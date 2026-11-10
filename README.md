@@ -1,5 +1,7 @@
 # MineNode
 
+![Pulpit MineNode – lista serwerów, zasoby hosta i proxy](docs/screenshots/dashboard.webp)
+
 Samodzielnie hostowany panel do zarządzania serwerami Minecraft Java. Działa w jednym kontenerze Dockera i zawiera:
 
 - **7 silników**: Vanilla, Paper, Purpur, Fabric, Quilt, Forge, NeoForge. Wersje i buildy są pobierane na żywo z oficjalnych API.
