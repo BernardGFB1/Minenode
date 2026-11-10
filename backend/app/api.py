@@ -9,6 +9,7 @@ import re
 import shutil
 import time
 import unicodedata
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from starlette.websockets import WebSocketDisconnect
 
+from . import storage as storage_mod
 from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
 from .config import DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
@@ -739,12 +741,15 @@ async def pardon(sid: str, name: str, _: str = Depends(auth.require_user)):
 @router.get("/servers/{sid}/backups")
 async def backups_list(sid: str, _: str = Depends(auth.require_user)):
     inst = inst_or_404(sid)
-    return {"backups": manager.backups.list(sid), "schedule": inst.cfg.backup.model_dump(),
-            "busy": manager.backups.busy(sid), "last_backup_at": inst.cfg.last_backup_at}
+    data = await manager.backups.list(sid)
+    return {**data, "schedule": inst.cfg.backup.model_dump(), "busy": manager.backups.busy(sid),
+            "last_backup_at": inst.cfg.last_backup_at,
+            "destinations": [{"id": d.id, "name": d.name, "type": d.type} for d in manager.backups.destinations()]}
 
 
 class BackupBody(BaseModel):
     note: str = Field(default="", max_length=200)
+    destinations: Optional[list[str]] = None
 
 
 @router.post("/servers/{sid}/backups")
@@ -753,47 +758,184 @@ async def backups_create(sid: str, body: BackupBody, _: str = Depends(auth.requi
     inst = inst_or_404(sid)
     if manager.backups.busy(sid):
         raise HTTPException(409, "Kopia jest już w trakcie tworzenia")
-    inst.spawn(manager.backups.create(inst, note=body.note))
+    inst.spawn(manager.backups.create(inst, note=body.note, targets=body.destinations))
     return {"ok": True}
 
 
 @router.post("/servers/{sid}/backups/{bid}/restore")
 @run_errors
-async def backups_restore(sid: str, bid: str, _: str = Depends(auth.require_user)):
+async def backups_restore(sid: str, bid: str, location: Optional[str] = None, _: str = Depends(auth.require_user)):
     inst = inst_or_404(sid)
     try:
-        await manager.backups.restore(inst, bid)
+        await manager.backups.restore(inst, bid, location)
     except FileNotFoundError:
         raise HTTPException(404, "Kopia nie istnieje")
     return {"ok": True}
 
 
 @router.delete("/servers/{sid}/backups/{bid}")
-async def backups_delete(sid: str, bid: str, _: str = Depends(auth.require_user)):
+@run_errors
+async def backups_delete(sid: str, bid: str, location: Optional[str] = None, _: str = Depends(auth.require_user)):
     inst_or_404(sid)
     try:
-        manager.backups.delete(sid, bid)
-    except (FileNotFoundError, ValueError):
+        await manager.backups.delete(sid, bid, location)
+    except (FileNotFoundError, KeyError):
         raise HTTPException(404, "Kopia nie istnieje")
     return {"ok": True}
 
 
 @router.get("/servers/{sid}/backups/{bid}/download")
-async def backups_download(sid: str, bid: str, _: str = Depends(auth.require_user)):
+async def backups_download(sid: str, bid: str, location: Optional[str] = None, _: str = Depends(auth.require_user)):
+    from . import storage as stg
     inst = inst_or_404(sid)
     try:
-        p = manager.backups.path(sid, bid)
+        dest = await manager.backups.locate(sid, bid, location)
     except (FileNotFoundError, ValueError):
         raise HTTPException(404, "Kopia nie istnieje")
-    return FileResponse(p, filename=f"{slugify(inst.cfg.name)}-{bid}.zip", media_type="application/zip")
+    store = stg.build(dest)
+    key = f"{sid}/{bid}.zip"
+    name = f"{slugify(inst.cfg.name)}-{bid}.zip"
+    local = store.local_path(key)
+    if local:
+        return FileResponse(local, filename=name, media_type="application/zip")
+    return StreamingResponse(store.stream(key), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.put("/servers/{sid}/backups/schedule")
 async def backups_schedule(sid: str, body: BackupSchedule, _: str = Depends(auth.require_user)):
     inst = inst_or_404(sid)
+    known = {d.id for d in manager.backups.destinations()}
+    body.destinations = [d for d in body.destinations if d in known] or ["local"]
     inst.cfg.backup = body
     manager.save_server(inst.cfg)
     return body.model_dump()
+
+
+# ====================================================================== backup destinations
+
+def _mask(d) -> dict:
+    out = d.model_dump()
+    for f in storage_mod.SECRET_FIELDS:
+        out[f] = ""
+        out[f + "_set"] = bool(getattr(d, f))
+    out["summary"] = storage_mod.describe(d)
+    return out
+
+
+@router.get("/backup-destinations")
+async def destinations_list(_: str = Depends(auth.require_user)):
+    used: dict[str, list[str]] = {}
+    for i in manager.instances.values():
+        for did in i.cfg.backup.destinations:
+            used.setdefault(did, []).append(i.cfg.name)
+    return [{**_mask(d), "used_by": used.get(d.id, [])} for d in manager.backups.destinations()]
+
+
+class DestinationBody(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    type: Literal["folder", "s3", "webdav"]
+    path: str = ""
+    endpoint: str = ""
+    region: str = ""
+    bucket: str = ""
+    prefix: str = "minenode"
+    access_key: str = ""
+    secret_key: str = ""
+    path_style: bool = False
+    url: str = ""
+    username: str = ""
+    password: str = ""
+
+
+def _build_dest(body: DestinationBody, did: str):
+    existing = next((d for d in manager.settings.backup_destinations if d.id == did), None)
+    data = body.model_dump()
+    data["endpoint"] = data["endpoint"].strip().rstrip("/")
+    data["url"] = data["url"].strip()
+    data["path"] = data["path"].strip()
+    for f in storage_mod.SECRET_FIELDS:  # empty secret on edit = keep the stored one
+        if not data[f] and existing is not None:
+            data[f] = getattr(existing, f)
+    from .models import BackupDestination
+    dest = BackupDestination(id=did, **data)
+    if dest.type == "folder":
+        storage_mod.validate_folder(dest.path)
+    if dest.type == "s3" and not dest.bucket:
+        raise storage_mod.StorageError("Podaj nazwę bucketu")
+    if dest.type == "s3" and dest.endpoint and not dest.endpoint.startswith(("http://", "https://")):
+        raise storage_mod.StorageError("Endpoint S3 musi zaczynać się od http:// lub https://")
+    if dest.type == "webdav" and not dest.url.startswith(("http://", "https://")):
+        raise storage_mod.StorageError("Adres WebDAV musi zaczynać się od http:// lub https://")
+    return dest
+
+
+@router.post("/backup-destinations/test")
+async def destinations_test(body: DestinationBody, id: Optional[str] = None, _: str = Depends(auth.require_user)):
+    try:
+        dest = _build_dest(body, id or "test")
+        started = time.time()
+        await storage_mod.build(dest).test()
+        return {"ok": True, "ms": int((time.time() - started) * 1000)}
+    except (storage_mod.StorageError, ValueError, ValidationError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/backup-destinations/{did}/test")
+async def destinations_test_saved(did: str, _: str = Depends(auth.require_user)):
+    try:
+        dest = manager.backups.destination(did)
+    except KeyError:
+        raise HTTPException(404, "Miejsce kopii nie istnieje")
+    try:
+        started = time.time()
+        await storage_mod.build(dest).test()
+        return {"ok": True, "ms": int((time.time() - started) * 1000)}
+    except (storage_mod.StorageError, ValueError, OSError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/backup-destinations")
+async def destinations_create(body: DestinationBody, _: str = Depends(auth.require_user)):
+    try:
+        dest = _build_dest(body, uuid.uuid4().hex[:8])
+    except (storage_mod.StorageError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    s = manager.settings
+    s.backup_destinations.append(dest)
+    manager.save_settings(s)
+    return _mask(dest)
+
+
+@router.put("/backup-destinations/{did}")
+async def destinations_update(did: str, body: DestinationBody, _: str = Depends(auth.require_user)):
+    s = manager.settings
+    idx = next((i for i, d in enumerate(s.backup_destinations) if d.id == did), None)
+    if idx is None:
+        raise HTTPException(404, "Miejsce kopii nie istnieje")
+    try:
+        dest = _build_dest(body, did)
+    except (storage_mod.StorageError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    s.backup_destinations[idx] = dest
+    manager.save_settings(s)
+    for inst in manager.instances.values():
+        manager.backups.invalidate(inst.cfg.id)
+    return _mask(dest)
+
+
+@router.delete("/backup-destinations/{did}")
+async def destinations_delete(did: str, _: str = Depends(auth.require_user)):
+    s = manager.settings
+    if not any(d.id == did for d in s.backup_destinations):
+        raise HTTPException(404, "Miejsce kopii nie istnieje")
+    s.backup_destinations = [d for d in s.backup_destinations if d.id != did]
+    manager.save_settings(s)
+    for inst in manager.instances.values():  # servers fall back to the panel disk
+        if did in inst.cfg.backup.destinations:
+            inst.cfg.backup.destinations = [x for x in inst.cfg.backup.destinations if x != did] or ["local"]
+            manager.save_server(inst.cfg)
+    return {"ok": True}
 
 
 # ====================================================================== files
@@ -1098,6 +1240,15 @@ async def content_update_all(sid: str, _: str = Depends(auth.require_user)):
         except Exception as exc:  # noqa: BLE001
             inst.panel_log(f"Aktualizacja {item['title']} nieudana: {exc}")
     return {"installed": done, "restart_required": inst.running}
+
+
+@router.post("/servers/{sid}/content/prune-client")
+@run_errors
+async def content_prune_client(sid: str, _: str = Depends(auth.require_user)):
+    from . import clientmods
+    inst = inst_or_404(sid)
+    disabled = await clientmods.prune(inst.dir, inst.panel_log)
+    return {"disabled": disabled, "restart_required": inst.running and bool(disabled)}
 
 
 @router.post("/servers/{sid}/content/toggle")

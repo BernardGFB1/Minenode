@@ -1,5 +1,5 @@
 <template>
-  <article class="card server" @click="$router.push(`/servers/${s.id}`)">
+  <article class="card server" :class="`tone-${stateTone(s.state)}`" @click="$router.push(`/servers/${s.id}`)">
     <div class="row" style="gap: 12px; align-items: flex-start">
       <ServerAvatar :server="s" :size="46" />
       <div class="grow" style="min-width: 0">
@@ -46,12 +46,18 @@ import { Globe, Copy, Play, Square, TerminalSquare } from 'lucide-vue-next'
 import Meter from './Meter.vue'
 import StatusBadge from './StatusBadge.vue'
 import ServerAvatar from './ServerAvatar.vue'
-import { ENGINE_META, formatBytes, formatDuration, formatMB, mcToHtml } from '../utils'
+import { ENGINE_META, formatBytes, formatDuration, formatMB, mcToHtml, stateTone } from '../utils'
 defineProps({ s: Object, now: Number })
 defineEmits(['power', 'copy'])
 </script>
 <style scoped>
-.server { padding: 18px; display: flex; flex-direction: column; gap: 14px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+.server { padding: 18px; display: flex; flex-direction: column; gap: 14px; cursor: pointer; transition: border-color 0.2s, box-shadow 0.2s; }
+.server.tone-on { border-color: var(--accent); }
+.server.tone-off { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.server.tone-busy { border-color: var(--warn); }
+.server.tone-on:hover { box-shadow: var(--shadow), 0 0 0 1px var(--accent) inset; }
+.server.tone-off:hover { border-color: color-mix(in srgb, var(--danger) 65%, var(--border)); }
+.server.tone-busy:hover { box-shadow: var(--shadow), 0 0 0 1px var(--warn) inset; }
 .server:hover { border-color: var(--border-strong); }
 .motd { background: var(--console-bg); color: #aaa; border-radius: var(--radius-sm); padding: 8px 10px; font-family: var(--mono); font-size: 12px; min-height: 34px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .address { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; color: var(--text-2); cursor: pointer; text-align: left; font-family: var(--mono); }

@@ -162,7 +162,7 @@ def mrpack_plan(archive: Path, log: Log) -> ModpackPlan:
             jobs, skipped = [], 0
             for f in index.get("files", []):
                 env = f.get("env") or {}
-                if env.get("server") == "unsupported":
+                if env.get("server") == "unsupported" or f["path"].startswith(("resourcepacks/", "shaderpacks/")):
                     skipped += 1
                     continue
                 dest = _safe_target(server_dir, f["path"])

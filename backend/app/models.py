@@ -28,6 +28,25 @@ class BackupSchedule(BaseModel):
     enabled: bool = False
     interval_hours: float = Field(default=24, gt=0, le=24 * 30)
     keep: int = Field(default=7, ge=1, le=500)
+    destinations: list[str] = ["local"]  # where scheduled (and default manual) backups go
+
+
+class BackupDestination(BaseModel):
+    """A place to store backups: the panel disk, a mounted folder (NAS), S3-compatible storage or WebDAV."""
+    id: str
+    name: str = Field(min_length=1, max_length=64)
+    type: Literal["local", "folder", "s3", "webdav"]
+    path: str = ""          # folder: absolute path inside the container (e.g. a NAS mount)
+    endpoint: str = ""      # s3: empty = AWS, otherwise e.g. https://s3.eu-central-003.backblazeb2.com
+    region: str = ""
+    bucket: str = ""
+    prefix: str = "minenode"
+    access_key: str = ""
+    secret_key: str = ""
+    path_style: bool = False  # s3: needed by MinIO and many self-hosted servers
+    url: str = ""           # webdav: folder URL, e.g. https://cloud.example.com/remote.php/dav/files/me/Backups
+    username: str = ""
+    password: str = ""
 
 
 class ModpackInfo(BaseModel):
@@ -116,6 +135,7 @@ class PanelSettings(BaseModel):
     version_starting: str = "§e● Uruchamianie"
     kick_offline: str = "§c{name} jest wyłączony."
     kick_starting: str = "§e{name} uruchamia się – spróbuj ponownie za chwilę."
+    backup_destinations: list[BackupDestination] = []
     kick_waking: str = "§a{name} właśnie się uruchamia!\n§7Dołącz ponownie za około minutę."
 
 

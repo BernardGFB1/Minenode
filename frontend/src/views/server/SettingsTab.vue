@@ -71,7 +71,7 @@
     <section class="card danger-zone">
       <div class="card-head"><AlertOctagon class="hi" /><h3>{{ $t('Strefa niebezpieczna') }}</h3></div>
       <div class="card-body row">
-        <div class="grow"><b>{{ $t('Usuń serwer') }}</b><div class="small muted">{{ $t('Usuwa wszystkie pliki serwera i jego kopie zapasowe. Nieodwracalne.') }}</div></div>
+        <div class="grow"><b>{{ $t('Usuń serwer') }}</b><div class="small muted">{{ $t('Usuwa pliki serwera i jego kopie na dysku panelu. Nieodwracalne.') }}</div></div>
         <button class="btn danger" @click="remove"><Trash2 /> {{ $t('Usuń serwer') }}</button>
       </div>
     </section>
@@ -134,7 +134,7 @@ async function reinstall() {
   try { await api.post(`/servers/${id}/reinstall`, { ...re }); router.push(`/servers/${id}/console`) } catch (e) { toastError(e) }
 }
 async function remove() {
-  const ok = await confirmDialog({ title: 'Usunąć serwer?', message: 'Wszystkie pliki i kopie zapasowe zostaną trwale usunięte.', confirmText: 'Usuń na zawsze', danger: true, typeToConfirm: live.summary.name })
+  const ok = await confirmDialog({ title: 'Usunąć serwer?', message: 'Pliki serwera i kopie na dysku panelu zostaną trwale usunięte. Kopie w zewnętrznych miejscach (NAS, S3, WebDAV) zostaną zachowane.', confirmText: 'Usuń na zawsze', danger: true, typeToConfirm: live.summary.name })
   if (!ok) return
   try { await api.del(`/servers/${id}`); toast('Usunięto serwer', 'success'); refreshFleet(); router.push('/') } catch (e) { toastError(e) }
 }

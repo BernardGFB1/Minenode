@@ -57,7 +57,7 @@
         <ServerCard v-for="s in shown" :key="s.id" :s="s" :now="now" @power="(a) => power(s, a)" @copy="copy" />
       </div>
       <div v-else class="card rows">
-        <div v-for="s in shown" :key="s.id" class="srow" @click="$router.push(`/servers/${s.id}`)">
+        <div v-for="s in shown" :key="s.id" class="srow" :class="`tone-${stateTone(s.state)}`" @click="$router.push(`/servers/${s.id}`)">
           <ServerAvatar :server="s" :size="36" />
           <div class="grow" style="min-width: 0">
             <b class="ellipsis">{{ s.name }}</b>
@@ -91,7 +91,7 @@ import ServerCard from '../components/ServerCard.vue'
 import { api } from '../api'
 import { fleet, refreshFleet } from '../servers'
 import { toast, toastError } from '../store'
-import { ENGINE_META, compact, copyText, formatBytes, formatMB } from '../utils'
+import { ENGINE_META, compact, copyText, formatBytes, formatMB, stateTone } from '../utils'
 
 const read = (k, d) => { try { return localStorage.getItem(k) || d } catch { return d } }
 const view = ref(read('minenode-dash-view', 'grid'))
@@ -170,7 +170,10 @@ async function copy(text) { if (await copyText(text)) toast('Skopiowano adres', 
 .servers-section { background: var(--bg-sunken); border-top: 1px solid var(--border); padding: 22px 32px 40px; }
 .servers-section > * { max-width: 1320px; width: 100%; margin-left: auto; margin-right: auto; }
 .rows { display: flex; flex-direction: column; padding: 6px; }
-.srow { display: flex; align-items: center; gap: 14px; padding: 9px 12px; border-radius: var(--radius-sm); cursor: pointer; }
+.srow { display: flex; align-items: center; gap: 14px; padding: 9px 12px; border-radius: var(--radius-sm); cursor: pointer; border-left: 3px solid transparent; }
+.srow.tone-on { border-left-color: var(--accent); }
+.srow.tone-off { border-left-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.srow.tone-busy { border-left-color: var(--warn); }
 .srow:hover { background: var(--surface-2); }
 .col-m { width: 54px; text-align: right; flex: none; }
 .col-ram { width: 150px; flex: none; display: flex; flex-direction: column; gap: 5px; }

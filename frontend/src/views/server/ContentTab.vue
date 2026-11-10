@@ -16,6 +16,7 @@
         <span class="small muted">{{ $t('{what} dla', { what: label }) }} <b class="text-2">{{ ENGINE_META[engine]?.name }} {{ mc }}</b> {{ $t('· folder') }} <span class="mono">{{ dir }}/</span></span>
         <span class="spacer" />
         <template v-if="view === 'installed'">
+          <button v-if="kind === 'mod'" class="btn sm" :disabled="busy.prune" :title="$t('Wyłącza mody działające tylko u gracza (shadery, minimapy, menu…), których nie wymaga żaden inny mod')" @click="pruneClient"><Loader2 v-if="busy.prune" class="spin" /><MonitorOff v-else /> {{ $t('Wyłącz mody klienckie') }}</button>
           <button class="btn sm" :disabled="checking" @click="load(true)"><Loader2 v-if="checking" class="spin" /><ShieldCheck v-else /> {{ $t('Sprawdź zgodność') }}</button>
           <button v-if="updates.length" class="btn sm primary" :disabled="busy.all" @click="updateAll"><Loader2 v-if="busy.all" class="spin" /><ArrowUpCircle v-else /> {{ $t('Aktualizuj wszystko ({n})', { n: updates.length }) }}</button>
         </template>
@@ -49,7 +50,8 @@
                 <div class="row" style="gap: 8px">
                   <b class="ellipsis">{{ it.title }}</b>
                   <span v-if="it.dependency" class="badge">{{ $t('zależność') }}</span>
-                  <span v-if="!it.enabled" class="badge">{{ $t('wyłączony') }}</span>
+                  <span v-if="!it.enabled && it.disabled_reason" class="badge amber" :title="$t(it.disabled_reason === 'crash' ? 'Wyłączony automatycznie – wysypał serwer przy starcie' : 'Wyłączony automatycznie – mod działa tylko po stronie gracza')">{{ $t(it.disabled_reason === 'crash' ? 'wysypał serwer' : 'tylko klient') }}</span>
+                  <span v-else-if="!it.enabled" class="badge">{{ $t('wyłączony') }}</span>
                 </div>
                 <div class="tiny muted ellipsis"><span v-if="it.version_number">{{ it.version_number }} · </span><span class="mono">{{ it.file }}</span> · {{ formatBytes(it.size) }}</div>
               </div>
@@ -113,7 +115,7 @@
 </template>
 <script setup>
 import { computed, inject, onMounted, reactive, ref } from 'vue'
-import { Puzzle, Package, Search, Loader2, ShieldCheck, ArrowUpCircle, RotateCcw, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Trash2, Download, Plus, Check, KeyRound } from 'lucide-vue-next'
+import { MonitorOff, Puzzle, Package, Search, Loader2, ShieldCheck, ArrowUpCircle, RotateCcw, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Trash2, Download, Plus, Check, KeyRound } from 'lucide-vue-next'
 import Toggle from '../../components/Toggle.vue'
 import { api } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
@@ -210,6 +212,15 @@ async function toggle(it, enabled) {
 async function remove(it) {
   if (!(await confirmDialog({ title: t('Usunąć {name}?', { name: it.title }), message: it.file, confirmText: t('Usuń'), danger: true }))) return
   try { afterChange(await api.del(`/servers/${id}/content/${encodeURIComponent(it.file)}`)); items.value = items.value.filter((x) => x !== it) } catch (e) { toastError(e) }
+}
+async function pruneClient() {
+  busy.prune = true
+  try {
+    const r = await api.post(`/servers/${id}/content/prune-client`)
+    afterChange(r)
+    toast(r.disabled.length ? t('Wyłączono modów tylko dla klienta: {n}', { n: r.disabled.length }) : t('Nie znaleziono modów tylko dla klienta.'), r.disabled.length ? 'success' : 'info')
+    load(true)
+  } catch (e) { toastError(e) } finally { busy.prune = false }
 }
 async function restart() {
   try { await api.post(`/servers/${id}/power`, { action: 'restart' }); restartNeeded.value = false } catch (e) { toastError(e) }

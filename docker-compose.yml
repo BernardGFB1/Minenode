@@ -9,6 +9,8 @@ services:
       - "24454:24454/udp"
     volumes:
       - minenode-data:/data
+      # Optional backup destination on a NAS / second disk – add it in Panel settings → Backup destinations:
+      # - /mnt/nas/minecraft-backups:/backups/nas
     environment:
       TZ: Europe/Warsaw
       PUID: "1000"

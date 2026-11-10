@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import time
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -339,6 +340,7 @@ def _scan(inst: "ServerInstance") -> list[dict]:
                         "icon": info.get("icon"), "version_number": info.get("version_number"),
                         "project_id": info.get("project_id"), "source": info.get("source"),
                         "version_id": info.get("version_id"), "dependency": info.get("dependency", False),
+                        "disabled_reason": info.get("disabled_reason") if p.name.endswith(".disabled") else None,
                         "game_versions": info.get("game_versions")})
     # drop hash cache for removed files
     names = {p.name for p in d.iterdir()} if d.exists() else set()
@@ -393,7 +395,7 @@ async def _verify(inst: "ServerInstance", items: list[dict]) -> None:
             it["icon"] = it["icon"] or p.get("icon_url")
             it["version_number"] = it["version_number"] or v["version_number"]
             gv, lv = v.get("game_versions", []), v.get("loaders", [])
-            if not set(lv) & set(loaders):
+            if not set(lv) & set(loaders) and not _jar_supports(inst, it["file"], it["enabled"], engine):
                 it["compat"], it["reason"] = "bad", f"wersja dla {', '.join(lv)}, serwer: {engine}"
             elif mc in gv:
                 it["compat"], it["reason"] = "ok", f"zgodny z {mc}"
@@ -411,6 +413,25 @@ async def _verify(inst: "ServerInstance", items: list[dict]) -> None:
             it["reason"] = f"pliki CurseForge: {', '.join([g for g in it['game_versions'] if re.match(r'^\\d', g)][-3:])}"
         else:
             it["compat"], it["reason"] = "unknown", "nie znaleziono w Modrinth – nie można zweryfikować"
+
+
+def _jar_supports(inst: "ServerInstance", file: str, enabled: bool, engine: str) -> bool:
+    """Many mods publish one file for several loaders – check the jar's own metadata as well."""
+    p = content_dir(inst) / (file if enabled else file + ".disabled")
+    try:
+        with zipfile.ZipFile(p) as zf:
+            names = set(zf.namelist())
+    except (zipfile.BadZipFile, OSError):
+        return False
+    if engine in ("fabric", "quilt"):
+        return "fabric.mod.json" in names or "quilt.mod.json" in names
+    if engine == "forge":
+        return "META-INF/mods.toml" in names
+    if engine == "neoforge":
+        return "META-INF/neoforge.mods.toml" in names or "META-INF/mods.toml" in names
+    if engine in ("paper", "purpur"):
+        return "plugin.yml" in names or "paper-plugin.yml" in names
+    return False
 
 
 async def warn_incompatible(inst: "ServerInstance") -> None:

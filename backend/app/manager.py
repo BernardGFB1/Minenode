@@ -97,6 +97,8 @@ class ServerInstance:
         self._props_cache: tuple[float, dict] | None = None
         self._last_daily_restart: str | None = None
         self.empty_since: float | None = None  # for idle auto-shutdown
+        self._start_seq = 0
+        self._autofix_count = 0
         self.players_store = JsonStore(PANEL_DIR / "players" / f"{cfg.id}.json", lambda: {"attempts": {}, "known": {}})
         self._load_log_history()
 
@@ -283,6 +285,12 @@ class ServerInstance:
                     self.set_job("Instalacja modpacka", stage, 0.6 + 0.38 * frac)
 
                 await plan.apply(self.dir, log, progress)
+                self.set_job("Instalacja modpacka", "Wyłączanie modów tylko dla klienta", 0.98)
+                from . import clientmods
+                try:
+                    await clientmods.prune(self.dir, log)
+                except Exception as exc:  # noqa: BLE001 – a failed check must not fail the install
+                    log(f"Nie udało się sprawdzić modów klienckich: {exc}")
 
             if eula:
                 (self.dir / "eula.txt").write_text(
@@ -322,7 +330,7 @@ class ServerInstance:
         cmd = [str(java), f"-Xms{min(j.min_ram_mb, j.max_ram_mb)}M", f"-Xmx{j.max_ram_mb}M"]
         cmd += jvm_flags(j.flags_preset, j.max_ram_mb, java_feature)
         cmd += ["-Dterminal.jline=false", "-Dterminal.ansi=true", "-Dlog4j2.formatMsgNoLookups=true",
-                "-Dfile.encoding=UTF-8"]
+                "-Dfile.encoding=UTF-8", "-Djava.awt.headless=true"]
         try:
             cmd += shlex.split(j.extra_jvm_args)
             extra_server = shlex.split(j.extra_server_args)
@@ -369,6 +377,7 @@ class ServerInstance:
                 self.set_state("crashed")
                 raise ServerError(str(exc)) from exc
             self.started_at = time.time()
+            self._start_seq = self._seq
             try:
                 self._ps = psutil.Process(self.proc.pid)
                 self._ps.cpu_percent(None)
@@ -403,6 +412,7 @@ class ServerInstance:
                 fut.set_result(True)
         if self.state == "starting" and DONE_RE.search(plain):
             self.set_state("online")
+            self._autofix_count = 0
             self.empty_since = time.time()
             self.panel_log(f"Serwer działa – adres: {self.address()}")
             if self.cfg.idle_shutdown_minutes:
@@ -488,6 +498,8 @@ class ServerInstance:
             return
         self.panel_log(f"Serwer zakończył działanie nieoczekiwanie (kod {code}) po {uptime:.0f} s.")
         self.set_state("crashed")
+        if await self._auto_fix_client_mod():
+            return
         now = time.time()
         self._crashes.append(now)
         recent = [t for t in self._crashes if now - t < 600]
@@ -500,6 +512,23 @@ class ServerInstance:
                     await self.start()
         elif self.cfg.auto_restart:
             self.panel_log("Automatyczny restart wstrzymany – zbyt wiele awarii lub awaria przy starcie. Sprawdź konsolę.")
+
+    async def _auto_fix_client_mod(self) -> bool:
+        """If a client-only mod crashed the startup, disable it and start again (bounded)."""
+        from . import clientmods
+        lines = [e["text"] for e in self.console if e["seq"] > self._start_seq and e["src"] == "out"]
+        jar = await asyncio.to_thread(clientmods.find_crashing_client_mod, [ANSI_RE.sub("", l) for l in lines], self.dir)
+        if not jar or self._autofix_count >= 10:
+            return False
+        self._autofix_count += 1
+        await asyncio.to_thread(clientmods.disable, self.dir, jar, "crash")
+        self.panel_log(f"Mod {jar.name} działa tylko po stronie klienta i wysypał serwer – został wyłączony "
+                       "(możesz go włączyć z powrotem w zakładce Mody). Ponowne uruchamianie…")
+        await asyncio.sleep(2)
+        if self.state == "crashed":
+            with contextlib.suppress(Exception):
+                await self.start()
+        return True
 
     async def send_command(self, command: str, echo: bool = True) -> None:
         command = command.strip().lstrip("/")

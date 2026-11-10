@@ -20,7 +20,7 @@ A self-hosted panel for running Minecraft Java servers. It ships as a single Doc
 - **Custom offline/starting appearance**: set the MOTD, version label and kick messages for stopped, starting and waking servers, with `{name}`, `{motd}`, `{address}`, `{mc_version}` and `{join_hint}` placeholders.
 - **Players**: a whitelist that lists players who tried to join without being on it (add them in one click), OP with a permission level, kick, ban and pardon.
 - **File manager**: browse, edit text files, drag-and-drop upload, unzip, and **download every server file as one ZIP** (streamed, no temporary files).
-- **Backups**: consistent backups (`save-off` / `save-all flush`) with scheduling and retention, plus download and restore.
+- **Backups anywhere**: consistent backups (`save-off` / `save-all flush`) with scheduling and per-destination retention. You can store them on the panel disk, a **mounted folder** (NAS share, second disk), **S3-compatible storage** (AWS, Backblaze B2, Cloudflare R2, Wasabi, MinIO) or **WebDAV** (Nextcloud, ownCloud, Synology), and on several at once. Download and restore work from any of them.
 - **English and Polish UI**: switch the language in the sidebar or on the login screen.
 
 ---
@@ -98,6 +98,18 @@ panel.example.com {
 
 WebSockets work out of the box. Expose the Minecraft (`25565/tcp`) and voice (`24454/udp`) ports directly.
 
+### Backup destinations
+
+Add destinations in **Panel settings → Backup destinations**, then pick them in each server's **Backups** tab (both for manual and scheduled backups). Every destination has a *Test connection* button that writes, reads and deletes a small file.
+
+| Type | What to enter |
+|------|---------------|
+| Folder / NAS | A path **inside the container**. Mount it first, e.g. `- /mnt/nas/minecraft-backups:/backups/nas`, then use `/backups/nas` |
+| S3 | Bucket, prefix, access/secret key; endpoint + region for non-AWS providers (presets included). Enable *path-style* for MinIO |
+| WebDAV | Folder URL (e.g. `https://cloud.example.com/remote.php/dav/files/<user>/Backups`), username and password (use an app password in Nextcloud) |
+
+Backups are stored as `<server-id>/<backup-id>.zip` plus a `.json` sidecar with metadata, so a destination can be browsed by hand. Large uploads to S3 use multipart transfers. Deleting a server removes only the copies on the panel disk, and backups in external destinations are kept.
+
 ### CurseForge
 
 CurseForge needs your own free API key from [console.curseforge.com](https://console.curseforge.com/). Paste it into **Panel settings** or set `CURSEFORGE_API_KEY`. Modrinth works without a key.
@@ -155,7 +167,8 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `modpacks.py` | Modrinth `.mrpack`, CurseForge manifests and server packs, file import |
 | `content.py` | Mods & plugins: search, install with dependencies, inventory, compatibility checks, updates |
 | `resourcepacks.py` | Resource pack library, hosting, `server.properties` activation |
-| `backups.py` | Consistent ZIP backups, retention, restore with rollback on failure |
+| `backups.py` | Consistent ZIP backups across destinations, per-destination retention, restore with rollback on failure |
+| `storage.py` | Backup storage backends: panel disk, mounted folder, S3 (boto3), WebDAV |
 | `players.py` | whitelist/ops/bans JSON, UUIDs from Mojang or offline mode |
 | `files.py` | Safe paths, streamed ZIP downloads |
 | `auth.py` | scrypt passwords, HMAC-signed sessions (httpOnly, SameSite=Strict), login rate limiting |

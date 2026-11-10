@@ -51,6 +51,13 @@ export const STATE = {
   not_installed: { label: 'Niezainstalowany', color: '' },
 }
 
+/** Card outline tone for a server state: green = running, red = stopped/crashed, amber = in between. */
+export function stateTone(state) {
+  if (state === 'online') return 'on'
+  if (['starting', 'stopping', 'installing'].includes(state)) return 'busy'
+  return 'off'
+}
+
 export const ENGINE_META = {
   vanilla: { name: 'Vanilla', color: '#7fa65a', letter: 'V' },
   paper: { name: 'Paper', color: '#e0e6ea', letter: 'P', ink: '#1d2a33' },

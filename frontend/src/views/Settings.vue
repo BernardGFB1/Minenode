@@ -90,6 +90,8 @@
         </div>
       </section>
 
+      <BackupDestinations />
+
       <section class="card">
         <div class="card-head"><KeyRound /><h3>CurseForge</h3>
           <span v-if="s.curseforge_configured" class="badge green">{{ $t('skonfigurowano') }}{{ s.curseforge_from_env ? ' (' + $t('zmienna środowiskowa') + ')' : '' }}</span>
@@ -160,6 +162,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
+import BackupDestinations from '../components/BackupDestinations.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
 import { MC_FONT } from '../mc'
 import Modal from '../components/Modal.vue'
