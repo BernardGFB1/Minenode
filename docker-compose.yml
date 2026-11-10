@@ -13,8 +13,8 @@ services:
       PUID: "1000"
       PGID: "1000"
       # Opcjonalnie – konto administratora tworzone przy pierwszym starcie (inaczej kreator w przeglądarce):
-      # MINENODE_ADMIN_USER: admin
-      # MINENODE_ADMIN_PASSWORD: zmien-mnie-na-dlugie-haslo
+      MINENODE_ADMIN_USER: admin
+      MINENODE_ADMIN_PASSWORD: adminadmin
       # Klucz API CurseForge (można też ustawić w panelu):
       # CURSEFORGE_API_KEY: ""
       # Ustaw na "true", gdy panel jest serwowany przez HTTPS:
