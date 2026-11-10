@@ -1,12 +1,11 @@
 services:
   minenode:
-    build: .
-    image: minenode:latest
+    image: zzabek/minenode:latest
     container_name: minenode
     restart: unless-stopped
     ports:
-      - "8080:8080"       # panel WWW (najlepiej za reverse proxy z HTTPS)
-      - "25565:25565"     # Minecraft – WSZYSTKIE serwery przez wbudowane proxy (routing po subdomenie)
+      - "8080:8080"
+      - "25565:25565"
     volumes:
       - minenode-data:/data
     environment:
