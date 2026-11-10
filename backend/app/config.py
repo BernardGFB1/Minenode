@@ -1,0 +1,45 @@
+"""Runtime configuration (environment driven) and data directory layout."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+VERSION = "1.0.0"
+APP_NAME = "MineNode"
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+DATA_DIR = Path(os.environ.get("MINENODE_DATA", "/data")).resolve()
+SERVERS_DIR = DATA_DIR / "servers"
+BACKUPS_DIR = DATA_DIR / "backups"
+JAVA_DIR = DATA_DIR / "java"
+CACHE_DIR = DATA_DIR / "cache"
+PANEL_DIR = DATA_DIR / "panel"
+TMP_DIR = DATA_DIR / "tmp"
+
+PANEL_HOST = os.environ.get("MINENODE_HOST", "0.0.0.0")
+PANEL_PORT = _env_int("MINENODE_PORT", 8080)
+PROXY_HOST = os.environ.get("MINENODE_PROXY_HOST", "0.0.0.0")
+PROXY_PORT = _env_int("MINENODE_PROXY_PORT", 25565)
+INTERNAL_PORT_START = _env_int("MINENODE_INTERNAL_PORT_START", 25600)
+
+# Optional bootstrap admin account (only used when no user exists yet).
+BOOTSTRAP_USER = os.environ.get("MINENODE_ADMIN_USER")
+BOOTSTRAP_PASSWORD = os.environ.get("MINENODE_ADMIN_PASSWORD")
+CURSEFORGE_API_KEY_ENV = os.environ.get("CURSEFORGE_API_KEY", "")
+SECURE_COOKIES = os.environ.get("MINENODE_SECURE_COOKIES", "false").lower() in ("1", "true", "yes")
+
+STATIC_DIR = Path(os.environ.get("MINENODE_STATIC", Path(__file__).resolve().parent.parent / "static"))
+
+USER_AGENT = f"minenode-panel/{VERSION} (self-hosted Minecraft server manager)"
+
+
+def ensure_dirs() -> None:
+    for d in (DATA_DIR, SERVERS_DIR, BACKUPS_DIR, JAVA_DIR, CACHE_DIR, PANEL_DIR, TMP_DIR):
+        d.mkdir(parents=True, exist_ok=True)
