@@ -3,6 +3,6 @@ dist/
 __pycache__/
 *.pyc
 .venv/
-data/
+/data/
 .DS_Store
 .dev-credentials.txt

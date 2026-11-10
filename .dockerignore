@@ -4,6 +4,6 @@
 **/*.pyc
 **/.venv
 **/.DS_Store
-data/
+/data/
 .git
 .dev-credentials.txt
