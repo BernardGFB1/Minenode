@@ -294,6 +294,11 @@ class ServerInstance:
                         await clientmods.prune(self.dir, log)
                 except Exception as exc:  # noqa: BLE001 – a failed check must not fail the install
                     log(f"Nie udało się sprawdzić modów klienckich: {exc}")
+                self.set_job("Instalacja modpacka", "Sprawdzanie brakujących zależności", 0.99)
+                try:
+                    await clientmods.repair_dependencies(self.dir, self.cfg.type, self.cfg.mc_version, log)
+                except Exception as exc:  # noqa: BLE001
+                    log(f"Nie udało się sprawdzić zależności modów: {exc}")
 
             if eula:
                 (self.dir / "eula.txt").write_text(
@@ -501,7 +506,7 @@ class ServerInstance:
             return
         self.panel_log(f"Serwer zakończył działanie nieoczekiwanie (kod {code}) po {uptime:.0f} s.")
         self.set_state("crashed")
-        if await self._auto_fix_client_mod():
+        if await self._auto_fix_client_mod() or await self._auto_fix_missing_deps():
             return
         now = time.time()
         self._crashes.append(now)
@@ -527,6 +532,31 @@ class ServerInstance:
         await asyncio.to_thread(clientmods.disable, self.dir, jar, "crash")
         self.panel_log(f"Mod {jar.name} działa tylko po stronie klienta i wysypał serwer – został wyłączony "
                        "(możesz go włączyć z powrotem w zakładce Mody). Ponowne uruchamianie…")
+        await asyncio.sleep(2)
+        if self.state == "crashed":
+            with contextlib.suppress(Exception):
+                await self.start()
+        return True
+
+    async def _auto_fix_missing_deps(self) -> bool:
+        """If startup died on a missing class, install required libraries the modpack forgot (bounded)."""
+        from . import clientmods
+        if self._autofix_count >= 10 or self.cfg.type not in ("fabric", "quilt", "forge", "neoforge"):
+            return False
+        lines = [ANSI_RE.sub("", e["text"]) for e in self.console if e["seq"] > self._start_seq and e["src"] == "out"]
+        if not clientmods.MISSING_CLASS.search("\n".join(lines[-600:])):
+            return False
+        self.panel_log("Serwer nie znalazł wymaganej biblioteki – sprawdzam brakujące zależności modów…")
+        try:
+            added = await clientmods.repair_dependencies(self.dir, self.cfg.type, self.cfg.mc_version, self.panel_log)
+        except Exception as exc:  # noqa: BLE001
+            self.panel_log(f"Nie udało się sprawdzić zależności: {exc}")
+            return False
+        if not added:
+            self.panel_log("Nie znaleziono brakujących zależności do doinstalowania – sprawdź konsolę.")
+            return False
+        self._autofix_count += 1
+        self.panel_log("Ponowne uruchamianie…")
         await asyncio.sleep(2)
         if self.state == "crashed":
             with contextlib.suppress(Exception):

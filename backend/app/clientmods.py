@@ -81,12 +81,14 @@ def _toml_mods(text: str) -> tuple[set[str], set[str], bool]:
 def read_meta(jar: Path) -> dict:
     """{ids, depends, client} from fabric.mod.json / quilt.mod.json / (neoforge.)mods.toml, incl. nested jars."""
     ids: set[str] = set()
+    top_ids: set[str] = set()
     depends: set[str] = set()
     client = False
 
     def scan(zf: zipfile.ZipFile, top: bool) -> None:
         nonlocal client
         names = set(zf.namelist())
+        before = set(ids)
         if "fabric.mod.json" in names:
             m = _loads(zf.read("fabric.mod.json"))
             if m.get("id"):
@@ -110,6 +112,8 @@ def read_meta(jar: Path) -> dict:
                 if top:
                     depends.update(tdeps)
                     client = client or tclient
+        if top:
+            top_ids.update(ids - before)
         if top:  # jar-in-jar libraries provide ids too
             for n in names:
                 if n.startswith("META-INF/jars/") and n.endswith(".jar"):
@@ -123,7 +127,7 @@ def read_meta(jar: Path) -> dict:
             scan(zf, True)
     except (zipfile.BadZipFile, OSError):
         pass
-    return {"ids": ids, "depends": depends - IGNORED_DEPS, "client": client}
+    return {"ids": ids, "top_ids": top_ids, "depends": depends - IGNORED_DEPS, "client": client}
 
 
 async def _modrinth_client_only(hashes: list[str]) -> set[str]:
@@ -233,3 +237,113 @@ def find_crashing_client_mod(lines: list[str], server_dir: Path) -> Path | None:
                 if mod.group(1) in read_meta(jar)["ids"]:
                     return jar
     return None
+
+
+# ---------------------------------------------------------------------------- missing dependencies
+
+MISSING_CLASS = re.compile(r"(NoClassDefFoundError|ClassNotFoundException)|requires .* which is missing|"
+                           r"Could not execute entrypoint|Missing or unsupported mandatory dependencies", re.I)
+
+
+def _record(server_dir: Path, jar: Path, version: dict, project: dict, sha1: str | None) -> None:
+    import time
+    meta_path = server_dir / ".minenode" / "content.json"
+    try:
+        meta = json.loads(meta_path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        meta = {"files": {}, "hashes": {}}
+    meta.setdefault("files", {})[jar.name] = {
+        "source": "modrinth", "project_id": version["project_id"], "version_id": version["id"],
+        "title": project.get("title"), "icon": project.get("icon_url"), "version_number": version["version_number"],
+        "slug": project.get("slug"), "installed_at": time.time(), "sha1": sha1, "dependency": True,
+        "added_reason": "missing-dependency",
+    }
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta, indent=1, ensure_ascii=False))
+
+
+async def repair_dependencies(server_dir: Path, engine: str, mc: str, log: Log, rounds: int = 3) -> list[str]:
+    """Install libraries that mods in <server>/mods require on Modrinth but the pack forgot to ship.
+
+    Some modpacks drop a library (e.g. Balm, TerraBlender) whose users don't declare it in their own metadata, so
+    the loader doesn't complain and the server dies later with NoClassDefFoundError. Modrinth's version metadata
+    still lists the requirement, so we resolve it from there. A candidate is skipped when any mod already provides
+    one of its mod ids (compat layers like TCLayer provide "trinkets"), when it doesn't exist for this loader and
+    Minecraft version, or when it isn't supported on servers.
+    """
+    from .content import LOADER_COMPAT, _pick, modrinth_versions
+
+    loaders = LOADER_COMPAT.get(engine) or []
+    if engine not in ("fabric", "quilt", "forge", "neoforge"):
+        return []
+    mods = server_dir / "mods"
+    if not mods.is_dir():
+        return []
+    added: list[str] = []
+    tried: set[str] = set()
+    for _ in range(rounds):
+        files = sorted(p for p in mods.iterdir() if p.is_file() and (p.suffix == ".jar" or p.name.endswith(".jar.disabled")))
+        enabled = [p for p in files if p.suffix == ".jar"]
+        if not enabled:
+            return added
+        metas = await asyncio.to_thread(lambda: {p: read_meta(p) for p in files})
+        present_ids = set().union(*(m["ids"] for m in metas.values()))
+        hashes = await asyncio.to_thread(lambda: {p: _sha1(p) for p in files})
+        try:
+            versions = await net.post_json(f"{MODRINTH}/version_files",
+                                           {"hashes": list(hashes.values()), "algorithm": "sha1"})
+        except (httpx.HTTPError, ValueError) as exc:
+            log(f"Nie udało się sprawdzić zależności modów: {exc}")
+            return added
+        present_projects = {v["project_id"] for v in versions.values()}
+        enabled_hashes = {hashes[p] for p in enabled}
+        missing: dict[str, list[str]] = {}
+        for h, v in versions.items():
+            if h not in enabled_hashes:
+                continue  # a disabled mod's requirements don't matter
+            for dep in v.get("dependencies", []):
+                pid = dep.get("project_id")
+                if dep.get("dependency_type") == "required" and pid and pid not in present_projects and pid not in tried:
+                    missing.setdefault(pid, []).append(v.get("name") or v.get("version_number", "?"))
+        if not missing:
+            break
+        tried.update(missing)
+        try:
+            projects = {p["id"]: p for p in await net.get_json(f"{MODRINTH}/projects",
+                                                               params={"ids": json.dumps(sorted(missing))})}
+        except (httpx.HTTPError, ValueError):
+            projects = {}
+        new_this_round = 0
+        for pid, users in missing.items():
+            project = projects.get(pid, {})
+            if project.get("project_type", "mod") != "mod" or project.get("server_side") == "unsupported":
+                continue
+            try:
+                v = _pick(await modrinth_versions(pid, mc, loaders))
+            except (httpx.HTTPError, ValueError):
+                v = None
+            if not v:
+                continue  # not available for this loader / version – usually a wrong declaration on Modrinth
+            f = next((x for x in v["files"] if x.get("primary")), v["files"][0])
+            tmp = server_dir / ".minenode" / "tmp" / Path(f["filename"]).name
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                await net.download(f["url"], tmp, sha1=f.get("hashes", {}).get("sha1"))
+            except Exception as exc:  # noqa: BLE001
+                log(f"  ⚠ Nie udało się pobrać {project.get('title', pid)}: {exc}")
+                continue
+            cand = await asyncio.to_thread(read_meta, tmp)
+            if not cand["top_ids"] or cand["top_ids"] & present_ids:
+                tmp.unlink(missing_ok=True)  # something already provides it under another project
+                continue
+            dest = mods / tmp.name
+            tmp.replace(dest)
+            present_ids |= cand["ids"]
+            await asyncio.to_thread(_record, server_dir, dest, v, project, f.get("hashes", {}).get("sha1"))
+            added.append(f"{project.get('title', pid)} {v['version_number']}")
+            new_this_round += 1
+            log(f"Doinstalowano brakującą bibliotekę {project.get('title', pid)} {v['version_number']} "
+                f"(wymagana przez: {', '.join(sorted(set(users))[:3])})")
+        if not new_this_round:
+            break
+    return added
