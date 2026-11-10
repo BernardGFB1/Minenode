@@ -2,22 +2,22 @@
   <div class="col" style="gap: 12px">
     <div class="card toolbar">
       <nav class="crumbs">
-        <button class="crumb" @click="go('')"><HardDrive /> serwer</button>
+        <button class="crumb" @click="go('')"><HardDrive /> {{ $t('serwer') }}</button>
         <template v-for="(c, i) in crumbs" :key="i">
           <ChevronRight class="sep" />
           <button class="crumb" @click="go(crumbs.slice(0, i + 1).join('/'))">{{ c }}</button>
         </template>
       </nav>
       <span class="spacer" />
-      <button v-if="selected.size" class="btn sm danger" @click="removeSelected"><Trash2 /> Usuń ({{ selected.size }})</button>
-      <button class="btn sm" @click="mkdir"><FolderPlus /> Folder</button>
-      <button class="btn sm" @click="newFile"><FilePlus /> Plik</button>
-      <label class="btn sm"><Upload /> Wgraj<input type="file" multiple hidden @change="uploadFiles($event.target.files); $event.target.value = ''" /></label>
-      <button class="btn sm primary" title="Pobierz wszystkie pliki serwera jako ZIP" @click="download(`/servers/${id}/files/archive`)"><Download /> Pobierz wszystko</button>
+      <button v-if="selected.size" class="btn sm danger" @click="removeSelected"><Trash2 /> {{ $t('Usuń ({n})', { n: selected.size }) }}</button>
+      <button class="btn sm" @click="mkdir"><FolderPlus /> {{ $t('Folder') }}</button>
+      <button class="btn sm" @click="newFile"><FilePlus /> {{ $t('Plik') }}</button>
+      <label class="btn sm"><Upload /> {{ $t('Wgraj') }}<input type="file" multiple hidden @change="uploadFiles($event.target.files); $event.target.value = ''" /></label>
+      <button class="btn sm primary" :title="$t('Pobierz wszystkie pliki serwera jako ZIP')" @click="download(`/servers/${id}/files/archive`)"><Download /> {{ $t('Pobierz wszystko') }}</button>
     </div>
 
     <div v-if="uploading" class="card card-body row small">
-      <Loader2 class="spin" style="width: 16px" /> Wysyłanie {{ uploading.name }}…
+      <Loader2 class="spin" style="width: 16px" /> {{ $t('Wysyłanie {name}…', { name: uploading.name }) }}
       <div class="progress grow"><div :style="{ width: uploading.p * 100 + '%' }" /></div>
     </div>
 
@@ -26,7 +26,7 @@
         <thead>
           <tr>
             <th style="width: 36px"><input type="checkbox" :checked="allChecked" @change="toggleAll" /></th>
-            <th>Nazwa</th><th style="width: 110px">Rozmiar</th><th style="width: 170px">Zmodyfikowano</th><th style="width: 130px" />
+            <th>{{ $t('Nazwa') }}</th><th style="width: 110px">{{ $t('Rozmiar') }}</th><th style="width: 170px">{{ $t('Zmodyfikowano') }}</th><th style="width: 130px" />
           </tr>
         </thead>
         <tbody>
@@ -44,31 +44,31 @@
             <td class="small muted">{{ formatDate(e.mtime) }}</td>
             <td @click.stop>
               <div class="row acts" style="gap: 2px; justify-content: flex-end">
-                <button v-if="isZip(e)" class="btn sm ghost icon" title="Rozpakuj" @click="extract(e)"><PackageOpen /></button>
-                <button class="btn sm ghost icon" title="Pobierz" @click="download(`/servers/${id}/files/download?path=${enc(join(e.name))}`)"><Download /></button>
-                <button class="btn sm ghost icon" title="Zmień nazwę" @click="rename(e)"><PenLine /></button>
-                <button class="btn sm ghost icon" title="Usuń" @click="remove([e.name])"><Trash2 /></button>
+                <button v-if="isZip(e)" class="btn sm ghost icon" :title="$t('Rozpakuj')" @click="extract(e)"><PackageOpen /></button>
+                <button class="btn sm ghost icon" :title="$t('Pobierz')" @click="download(`/servers/${id}/files/download?path=${enc(join(e.name))}`)"><Download /></button>
+                <button class="btn sm ghost icon" :title="$t('Zmień nazwę')" @click="rename(e)"><PenLine /></button>
+                <button class="btn sm ghost icon" :title="$t('Usuń')" @click="remove([e.name])"><Trash2 /></button>
               </div>
             </td>
           </tr>
-          <tr v-if="!loading && !entries.length"><td colspan="5" class="empty small">Folder jest pusty. Przeciągnij tutaj pliki, aby je wgrać.</td></tr>
+          <tr v-if="!loading && !entries.length"><td colspan="5" class="empty small">{{ $t('Folder jest pusty. Przeciągnij tutaj pliki, aby je wgrać.') }}</td></tr>
         </tbody>
       </table>
-      <div v-if="dragOver" class="dropmask"><Upload /> Upuść, aby wgrać do /{{ path }}</div>
+      <div v-if="dragOver" class="dropmask"><Upload /> {{ $t('Upuść, aby wgrać do /{path}', { path }) }}</div>
     </div>
 
     <Modal :open="!!editor" :title="editor?.path" width="min(1100px, 96vw)" @close="closeEditor">
       <textarea v-if="editor" ref="ta" v-model="editor.content" class="editor" spellcheck="false" @keydown="editorKey" />
       <template #footer>
-        <span class="tiny muted grow"><span class="kbd">Ctrl/⌘ S</span> zapisuje</span>
-        <button class="btn" @click="closeEditor">Zamknij</button>
-        <button class="btn primary" :disabled="editor?.content === editor?.original" @click="saveFile"><Save /> Zapisz</button>
+        <span class="tiny muted grow"><span class="kbd">{{ $t('Ctrl/⌘ S') }}</span> {{ $t('zapisuje') }}</span>
+        <button class="btn" @click="closeEditor">{{ $t('Zamknij') }}</button>
+        <button class="btn primary" :disabled="editor?.content === editor?.original" @click="saveFile"><Save /> {{ $t('Zapisz') }}</button>
       </template>
     </Modal>
 
     <Modal :open="!!prompt.open" :title="prompt.title" width="420px" @close="prompt.open = false">
       <input ref="promptInput" v-model="prompt.value" class="input mono" @keydown.enter="prompt.ok()" />
-      <template #footer><button class="btn" @click="prompt.open = false">Anuluj</button><button class="btn primary" :disabled="!prompt.value" @click="prompt.ok()">OK</button></template>
+      <template #footer><button class="btn" @click="prompt.open = false">{{ $t('Anuluj') }}</button><button class="btn primary" :disabled="!prompt.value" @click="prompt.ok()">OK</button></template>
     </Modal>
   </div>
 </template>

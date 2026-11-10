@@ -6,24 +6,26 @@ services:
     ports:
       - "8080:8080"
       - "25565:25565"
+      - "24454:24454/udp"   # Simple Voice Chat – one shared UDP port for all servers
     volumes:
       - minenode-data:/data
     environment:
       TZ: Europe/Warsaw
       PUID: "1000"
       PGID: "1000"
-      # Opcjonalnie – konto administratora tworzone przy pierwszym starcie (inaczej kreator w przeglądarce):
+      # Optional – admin account created on first start (otherwise a setup wizard runs in the browser).
+      # Change the password in the panel after the first login.
       MINENODE_ADMIN_USER: admin
       MINENODE_ADMIN_PASSWORD: adminadmin
-      # Klucz API CurseForge (można też ustawić w panelu):
+      # CurseForge API key (can also be set in the panel):
       # CURSEFORGE_API_KEY: ""
-      # Ustaw na "true", gdy panel jest serwowany przez HTTPS:
+      # Set to "true" when the panel is served over HTTPS:
       MINENODE_SECURE_COOKIES: "false"
-    # Serwery dostają czas na zapis świata przy zatrzymaniu kontenera
+    # Gives servers time to save their worlds when the container stops
     stop_grace_period: 2m
     ulimits:
       nofile: { soft: 65535, hard: 65535 }
-    # Limit pamięci kontenera – panel pokaże go przy suwakach RAM
+    # Container memory limit – shown next to the RAM sliders in the panel
     # deploy:
     #   resources:
     #     limits:

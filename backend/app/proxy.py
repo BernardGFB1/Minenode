@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hmac
+import re
 import ipaddress
 import json
 import logging
@@ -132,11 +134,12 @@ class MinecraftProxy:
         self.per_server: dict[str, int] = {}
         self.started_at = time.time()
         self.error: str | None = None
+        self.http_served = 0
 
     def stats(self) -> dict:
         return {"host": self.host, "port": self.port, "active": self.active, "total": self.total,
                 "bytes_up": self.bytes_up, "bytes_down": self.bytes_down, "per_server": dict(self.per_server),
-                "listening": self.server is not None, "error": self.error}
+                "listening": self.server is not None, "error": self.error, "packs_served": self.http_served}
 
     async def start(self) -> None:
         try:
@@ -166,6 +169,8 @@ class MinecraftProxy:
             await self._close(writer)
         except _Piped as piped:
             await self._pipe(reader, writer, piped.r, piped.w, piped.inst)
+        except _Http as req:
+            await self._serve_http(writer, req.method, req.path)
         except Exception:
             log.exception("proxy error")
             await self._close(writer)
@@ -175,11 +180,23 @@ class MinecraftProxy:
         if first == b"\xfe":  # legacy (<1.7) server list ping – not supported, close politely
             await self._close(writer)
             return
-        # put the byte back by parsing length manually
-        length, raw_rest = await self._finish_varint(first, reader)
-        if length <= 0 or length > MAX_HANDSHAKE:
-            raise ProtocolError("bad handshake length")
-        body = await reader.readexactly(length)
+        if first in (b"G", b"H"):
+            # Plain HTTP on the Minecraft port – used to serve resource packs (GET/HEAD only).
+            more = await reader.readexactly(3)
+            if first + more in (b"GET ", b"HEAD"):
+                head = first + more + await reader.readuntil(b"\r\n\r\n")
+                if len(head) > 8192:
+                    raise ProtocolError("http header too large")
+                parts = head.split(b"\r\n", 1)[0].decode("latin-1").split(" ")
+                raise _Http(parts[0], parts[1] if len(parts) > 1 else "/")
+            # 'G'/'H' is also a valid single-byte VarInt (71/72) – continue as Minecraft
+            length, raw_rest = first[0], b""
+            body = more + await reader.readexactly(length - 3)
+        else:
+            length, raw_rest = await self._finish_varint(first, reader)
+            if length <= 0 or length > MAX_HANDSHAKE:
+                raise ProtocolError("bad handshake length")
+            body = await reader.readexactly(length)
         handshake_raw = first + raw_rest + body
         pid, pos = parse_varint(body, 0)
         if pid != 0:
@@ -193,13 +210,19 @@ class MinecraftProxy:
         inst = self.m.resolve_host(hostname)
         buffered = handshake_raw
         player = None
+        player_uuid = None
         if next_state in (2, 3):  # login / transfer
             raw, login_body = await read_packet(reader)
             buffered += raw
-            with contextlib.suppress(ProtocolError):
+            player_uuid = None
+            with contextlib.suppress(ProtocolError, ValueError, IndexError):
                 lpid, lpos = parse_varint(login_body, 0)
                 if lpid == 0:
-                    player, _ = parse_string(login_body, lpos, 16)
+                    player, lpos = parse_string(login_body, lpos, 16)
+                    if protocol >= 764 and len(login_body) >= lpos + 16:      # 1.20.2+: UUID always present
+                        player_uuid = login_body[lpos:lpos + 16].hex()
+                    elif protocol >= 761 and len(login_body) >= lpos + 17 and login_body[lpos] == 1:  # 1.19.3–1.20.1
+                        player_uuid = login_body[lpos + 1:lpos + 17].hex()
 
         if inst is None:
             await self._reply_offline(reader, writer, next_state, "unknown", None, hostname)
@@ -207,6 +230,8 @@ class MinecraftProxy:
 
         if player and self._not_whitelisted(inst, player):
             inst.record_attempt(player, None, "proxy")
+        if player and inst is not None:
+            inst.bind_voice(player, player_uuid if next_state in (2, 3) else None)
 
         if inst.state != "online":
             if next_state in (2, 3) and inst.request_start():
@@ -302,6 +327,45 @@ class MinecraftProxy:
         finally:
             await self._close(writer)
 
+    async def _serve_http(self, writer, method: str, path: str) -> None:
+        """Minimal HTTP/1.1 responder for hosted resource packs (/rp/<server>/<token>/<pack>.zip)."""
+        from . import resourcepacks as rpacks
+        status, headers, file = "404 Not Found", {"Content-Type": "text/plain; charset=utf-8"}, None
+        body = b"MineNode resource pack host\n"
+        try:
+            m = re.match(r"^/rp/([0-9a-f]{6,32})/([A-Za-z0-9_-]{8,64})/([0-9a-f]{12})\.zip(\?.*)?$", path)
+            if method not in ("GET", "HEAD"):
+                status, body = "405 Method Not Allowed", b"Method not allowed\n"
+            elif m and (inst := self.m.instances.get(m.group(1))):
+                try:
+                    pack, p = rpacks.get(inst, m.group(3))
+                    if hmac.compare_digest(pack["token"], m.group(2)) and p.exists():
+                        status, file, body = "200 OK", p, b""
+                        headers = {"Content-Type": "application/zip", "Content-Length": str(p.stat().st_size),
+                                   "Cache-Control": "public, max-age=86400", "ETag": f'"{pack["sha1"]}"'}
+                except FileNotFoundError:
+                    pass
+            if not file:
+                headers["Content-Length"] = str(len(body))
+            head = f"HTTP/1.1 {status}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + \
+                "Connection: close\r\nServer: MineNode\r\n\r\n"
+            writer.write(head.encode("latin-1"))
+            if method != "HEAD":
+                if file:
+                    with open(file, "rb") as fh:
+                        while chunk := fh.read(256 * 1024):
+                            writer.write(chunk)
+                            self.bytes_down += len(chunk)
+                            await writer.drain()
+                else:
+                    writer.write(body)
+            await writer.drain()
+            self.http_served += 1 if file else 0
+        except (ConnectionError, OSError):
+            pass
+        finally:
+            await self._close(writer)
+
     async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance") -> None:
         sid = inst.cfg.id
         self.active += 1
@@ -346,6 +410,12 @@ class MinecraftProxy:
         with contextlib.suppress(Exception):
             writer.close()
             await asyncio.wait_for(writer.wait_closed(), 2)
+
+
+class _Http(Exception):
+    def __init__(self, method: str, path: str):
+        super().__init__()
+        self.method, self.path = method, path
 
 
 class _Piped(Exception):

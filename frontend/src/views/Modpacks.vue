@@ -2,8 +2,8 @@
   <div class="page">
     <div class="page-head">
       <div class="grow">
-        <h1>Modpacki</h1>
-        <div class="sub">Zainstaluj gotową paczkę modów jako nowy serwer – loader, mody i konfiguracja zostaną pobrane automatycznie.</div>
+        <h1>{{ $t('Modpacki') }}</h1>
+        <div class="sub">{{ $t('Zainstaluj gotową paczkę modów jako nowy serwer – loader, mody i konfiguracja zostaną pobrane automatycznie.') }}</div>
       </div>
     </div>
 
@@ -11,22 +11,22 @@
       <div class="seg">
         <button :class="{ active: source === 'modrinth' }" @click="setSource('modrinth')">Modrinth</button>
         <button :class="{ active: source === 'curseforge' }" @click="setSource('curseforge')">CurseForge</button>
-        <button :class="{ active: source === 'file' }" @click="setSource('file')"><Upload /> Z pliku</button>
+        <button :class="{ active: source === 'file' }" @click="setSource('file')"><Upload /> {{ $t('Z pliku') }}</button>
       </div>
       <template v-if="source !== 'file'">
         <div class="searchbox grow">
           <Search />
-          <input v-model="q" placeholder="Szukaj modpacków, np. All the Mods, Cobblemon, Create…" @keydown.enter="search(true)" />
+          <input v-model="q" :placeholder="$t('Szukaj modpacków, np. All the Mods, Cobblemon, Create…')" @keydown.enter="search(true)" />
         </div>
-        <input v-model="mcFilter" class="input" style="width: 130px" placeholder="Wersja MC" @keydown.enter="search(true)" />
-        <button class="btn primary" @click="search(true)">Szukaj</button>
+        <input v-model="mcFilter" class="input" style="width: 130px" :placeholder="$t('Wersja MC')" @keydown.enter="search(true)" />
+        <button class="btn primary" @click="search(true)">{{ $t('Szukaj') }}</button>
       </template>
     </div>
 
     <div v-if="source === 'curseforge' && settings && !settings.curseforge_configured" class="callout warn" style="margin-bottom: 16px">
       <KeyRound />
-      <div>CurseForge wymaga klucza API. Wygeneruj go na <a href="https://console.curseforge.com/" target="_blank" rel="noopener">console.curseforge.com</a>
-        i wklej w <router-link to="/settings">Ustawieniach panelu</router-link>.</div>
+      <div>{{ $t('CurseForge wymaga klucza API. Wygeneruj go na') }} <a href="https://console.curseforge.com/" target="_blank" rel="noopener">{{ $t('console.curseforge.com') }}</a>
+        {{ $t('i wklej w') }} <router-link to="/settings">{{ $t('Ustawieniach panelu') }}</router-link>.</div>
     </div>
 
     <!-- upload -->
@@ -35,13 +35,13 @@
         <input type="file" accept=".mrpack,.zip" hidden @change="file = $event.target.files[0]; prefill()" />
         <FileArchive />
         <div v-if="file"><b>{{ file.name }}</b> <span class="muted">({{ formatBytes(file.size) }})</span></div>
-        <div v-else><b>Upuść plik .mrpack lub ZIP z CurseForge</b><div class="small muted">albo kliknij, aby wybrać</div></div>
+        <div v-else><b>{{ $t('Upuść plik .mrpack lub ZIP z CurseForge') }}</b><div class="small muted">{{ $t('albo kliknij, aby wybrać') }}</div></div>
       </label>
       <InstallForm v-model="installForm" :settings="settings" :sys="sys" />
       <div v-if="uploadProgress != null" class="progress"><div :style="{ width: uploadProgress * 100 + '%' }" /></div>
       <div class="row"><span class="spacer" />
         <button class="btn primary" :disabled="!file || !installForm.name || !installForm.eula || busy" @click="installFile">
-          <Loader2 v-if="busy" class="spin" /><Rocket v-else /> Zainstaluj z pliku
+          <Loader2 v-if="busy" class="spin" /><Rocket v-else /> {{ $t('Zainstaluj z pliku') }}
         </button>
       </div>
     </div>
@@ -49,14 +49,14 @@
     <!-- results -->
     <template v-else>
       <div v-if="loading && !items.length" class="empty"><Loader2 class="spin" /></div>
-      <div v-else-if="error" class="callout warn"><AlertTriangle />{{ error }}</div>
+      <div v-else-if="error" class="callout warn"><AlertTriangle />{{ $tm(error) }}</div>
       <div class="packs">
         <article v-for="p in items" :key="p.id" class="card pack" @click="open(p)">
           <img v-if="p.icon" :src="p.icon" class="picon" alt="" loading="lazy" referrerpolicy="no-referrer" />
           <div v-else class="picon ph"><Package /></div>
           <div class="grow" style="min-width: 0">
             <h3 class="ellipsis">{{ p.title }}</h3>
-            <div class="tiny muted ellipsis">{{ p.author ? 'od ' + p.author : '' }}</div>
+            <div class="tiny muted ellipsis">{{ p.author ? $t('od {who}', { who: p.author }) : '' }}</div>
             <p class="small text-2 desc">{{ p.description }}</p>
             <div class="row wrap" style="gap: 6px; margin-top: 8px">
               <span class="badge"><Download style="width: 12px; height: 12px" /> {{ compact(p.downloads) }}</span>
@@ -67,9 +67,9 @@
         </article>
       </div>
       <div v-if="items.length && items.length < total" class="row" style="justify-content: center; margin-top: 18px">
-        <button class="btn" :disabled="loading" @click="search(false)"><Loader2 v-if="loading" class="spin" /> Pokaż więcej</button>
+        <button class="btn" :disabled="loading" @click="search(false)"><Loader2 v-if="loading" class="spin" /> {{ $t('Pokaż więcej') }}</button>
       </div>
-      <div v-if="!loading && !items.length && !error" class="empty">Brak wyników.</div>
+      <div v-if="!loading && !items.length && !error" class="empty">{{ $t('Brak wyników.') }}</div>
     </template>
 
     <Modal :open="!!selected" :title="selected?.title" width="760px" @close="selected = null">
@@ -78,18 +78,18 @@
           <img v-if="selected.icon" :src="selected.icon" class="picon" alt="" referrerpolicy="no-referrer" />
           <div class="grow">
             <p class="text-2">{{ selected.description }}</p>
-            <a v-if="selected.url" :href="selected.url" target="_blank" rel="noopener" class="small">Zobacz na {{ selected.source === 'modrinth' ? 'Modrinth' : 'CurseForge' }} ↗</a>
+            <a v-if="selected.url" :href="selected.url" target="_blank" rel="noopener" class="small">{{ $t('Zobacz na {site}', { site: selected.source === 'modrinth' ? 'Modrinth' : 'CurseForge' }) }} ↗</a>
           </div>
         </div>
         <div class="field">
-          <label>Wersja paczki</label>
-          <div v-if="versionsLoading" class="muted small row"><Loader2 class="spin" style="width: 14px" /> Ładowanie wersji…</div>
+          <label>{{ $t('Wersja paczki') }}</label>
+          <div v-if="versionsLoading" class="muted small row"><Loader2 class="spin" style="width: 14px" /> {{ $t('Ładowanie wersji…') }}</div>
           <div v-else class="vlist">
             <label v-for="v in versions" :key="v.id" class="vitem" :class="{ active: versionId === v.id }">
               <input v-model="versionId" type="radio" :value="v.id" />
               <div class="grow" style="min-width: 0">
                 <div class="ellipsis" style="font-weight: 550">{{ v.name }}</div>
-                <div class="tiny muted">{{ formatDate(v.date) }} · {{ formatBytes(v.size) }}<template v-if="v.server_pack"> · ma paczkę serwerową</template></div>
+                <div class="tiny muted">{{ formatDate(v.date) }} · {{ formatBytes(v.size) }}<template v-if="v.server_pack"> {{ $t('· ma paczkę serwerową') }}</template></div>
               </div>
               <span v-if="v.type !== 'release'" class="badge amber">{{ v.type }}</span>
               <span v-for="l in v.loaders.slice(0, 2)" :key="l" class="badge">{{ l }}</span>
@@ -100,9 +100,9 @@
         <InstallForm v-model="installForm" :settings="settings" :sys="sys" />
       </div>
       <template #footer>
-        <button class="btn" @click="selected = null">Anuluj</button>
+        <button class="btn" @click="selected = null">{{ $t('Anuluj') }}</button>
         <button class="btn primary" :disabled="!versionId || !installForm.name || !installForm.eula || busy" @click="installSelected">
-          <Loader2 v-if="busy" class="spin" /><Rocket v-else /> Zainstaluj modpack
+          <Loader2 v-if="busy" class="spin" /><Rocket v-else /> {{ $t('Zainstaluj modpack') }}
         </button>
       </template>
     </Modal>
@@ -116,6 +116,7 @@ import Modal from '../components/Modal.vue'
 import InstallForm from '../components/InstallForm.vue'
 import { api, uploadWithProgress } from '../api'
 import { toast, toastError } from '../store'
+import { t } from '../i18n'
 import { refreshFleet } from '../servers'
 import { compact, formatBytes, formatDate } from '../utils'
 
@@ -189,7 +190,7 @@ async function installSelected() {
       source: selected.value.source, project_id: selected.value.id, version_id: versionId.value,
       name: f.name, subdomain: f.subdomain || null, eula: f.eula, java: javaOf(f), icon_url: selected.value.icon,
     })
-    toast(`Instalowanie modpacka „${s.name}”…`, 'success')
+    toast(t('Instalowanie modpacka „{name}”…', { name: s.name }), 'success')
     refreshFleet()
     router.push(`/servers/${s.id}/console`)
   } catch (e) { toastError(e) } finally { busy.value = false }
@@ -216,7 +217,7 @@ async function installFile() {
     fd.append('max_ram_mb', f.max_ram_mb)
     fd.append('eula', f.eula ? 'true' : 'false')
     const s = await uploadWithProgress('/servers/modpack/upload', fd, (p) => (uploadProgress.value = p))
-    toast(`Instalowanie modpacka „${s.name}”…`, 'success')
+    toast(t('Instalowanie modpacka „{name}”…', { name: s.name }), 'success')
     refreshFleet()
     router.push(`/servers/${s.id}/console`)
   } catch (e) { toastError(e) } finally { busy.value = false; uploadProgress.value = null }

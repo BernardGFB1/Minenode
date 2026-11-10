@@ -20,7 +20,7 @@ import psutil
 from . import java as javamod
 from . import players as playersmod
 from . import providers
-from .config import INTERNAL_PORT_START, PANEL_DIR, PROXY_PORT, SERVERS_DIR
+from .config import INTERNAL_PORT_START, INTERNAL_VOICE_PORT_START, PANEL_DIR, PROXY_PORT, SERVERS_DIR, VOICE_PORT
 from .models import PanelSettings, ServerConfig
 from .properties import read_properties, update_properties
 from .store import JsonStore
@@ -310,6 +310,9 @@ class ServerInstance:
         if props.get("query.port") == "25565" or (initial and "query.port" not in props):
             changes["query.port"] = self.cfg.internal_port
         update_properties(path, changes)
+        if self.cfg.voice_enabled:
+            from . import voice
+            voice.write_config(self, VOICE_PORT)
 
     # ------------------------------------------------------------ lifecycle
     def build_command(self, java: Path | str, java_feature: int | None) -> list[str]:
@@ -442,6 +445,16 @@ class ServerInstance:
             entry["uuid"] = uid
         known[k] = entry
         self.players_store.save()
+        self.bind_voice(name, entry.get("uuid"))
+
+    def bind_voice(self, name: str, uid: str | None) -> None:
+        """Tell the voice proxy which server this player is on (UUID is in every SVC packet)."""
+        vp = getattr(self.m, "voice", None)
+        if not vp or not self.cfg.voice_enabled:
+            return
+        if not self.online_mode:
+            uid = playersmod.offline_uuid(name)
+        vp.bind(uid, self.cfg.id)
 
     def record_attempt(self, name: str, uid: str | None, source: str) -> None:
         if not playersmod.NAME_RE.match(name):
@@ -574,6 +587,7 @@ class Manager:
         self._tasks: list[asyncio.Task] = []
         self.backups = None  # set in main
         self.proxy = None
+        self.voice = None
         for sid, raw in self.servers_store.data.items():
             try:
                 cfg = ServerConfig.model_validate(raw)
@@ -599,6 +613,13 @@ class Manager:
         if not inst:
             raise KeyError(sid)
         return inst
+
+    def allocate_voice_port(self) -> int:
+        used = {i.cfg.voice_port for i in self.instances.values() if i.cfg.voice_port}
+        port = INTERNAL_VOICE_PORT_START
+        while port in used or port == VOICE_PORT:
+            port += 1
+        return port
 
     def allocate_port(self) -> int:
         used = {i.cfg.internal_port for i in self.instances.values()}

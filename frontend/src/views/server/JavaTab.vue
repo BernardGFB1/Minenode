@@ -2,38 +2,38 @@
   <div v-if="info && j" class="grid" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start">
     <div class="col" style="gap: 16px">
       <section class="card">
-        <div class="card-head"><Coffee class="hi" /><h3>Środowisko Java</h3></div>
+        <div class="card-head"><Coffee class="hi" /><h3>{{ $t('Środowisko Java') }}</h3></div>
         <div class="card-body col" style="gap: 14px">
           <div class="jopts">
             <label class="jopt" :class="{ active: j.version == null }">
               <input v-model="j.version" type="radio" :value="null" />
-              <div><b>Automatycznie</b><div class="tiny muted">Java {{ autoFeature }} dla MC {{ live.summary.mc_version }}</div></div>
-              <span class="badge green">zalecane</span>
+              <div><b>{{ $t('Automatycznie') }}</b><div class="tiny muted">{{ $t('Java {j} dla MC {mc}', { j: autoFeature, mc: live.summary.mc_version }) }}</div></div>
+              <span class="badge green">{{ $t('zalecane') }}</span>
             </label>
             <label v-for="v in info.available_java" :key="v" class="jopt" :class="{ active: j.version === v, warn: v < info.required_java }">
               <input v-model="j.version" type="radio" :value="v" />
-              <div><b>Java {{ v }}</b><div class="tiny muted">{{ info.installed_java.includes(v) ? 'pobrana' : 'zostanie pobrana przy starcie' }}</div></div>
-              <span v-if="v < info.required_java" class="badge red">za stara</span>
+              <div><b>Java {{ v }}</b><div class="tiny muted">{{ info.installed_java.includes(v) ? $t('pobrana') : $t('zostanie pobrana przy starcie') }}</div></div>
+              <span v-if="v < info.required_java" class="badge red">{{ $t('za stara') }}</span>
             </label>
           </div>
-          <div v-if="j.version && j.version < info.required_java" class="callout warn small"><AlertTriangle />Minecraft {{ live.summary.mc_version }} wymaga Javy {{ info.required_java }}+. Serwer najpewniej się nie uruchomi.</div>
+          <div v-if="j.version && j.version < info.required_java" class="callout warn small"><AlertTriangle />{{ $t('Minecraft {mc} wymaga Javy {j}+. Serwer najpewniej się nie uruchomi.', { mc: live.summary.mc_version, j: info.required_java }) }}</div>
         </div>
       </section>
 
       <section class="card">
-        <div class="card-head"><MemoryStick class="hi" /><h3>Pamięć</h3></div>
+        <div class="card-head"><MemoryStick class="hi" /><h3>{{ $t('Pamięć') }}</h3></div>
         <div class="card-body">
           <RamPicker v-model:min="j.min_ram_mb" v-model:max="j.max_ram_mb" :total-bytes="info.mem_total" :other-bytes="info.allocated_other" />
         </div>
       </section>
 
       <section class="card">
-        <div class="card-head"><Zap class="hi" /><h3>Optymalizacje JVM</h3></div>
+        <div class="card-head"><Zap class="hi" /><h3>{{ $t('Optymalizacje JVM') }}</h3></div>
         <div class="card-body col" style="gap: 10px">
           <label v-for="p in presets" :key="p.id" class="preset" :class="{ active: j.flags_preset === p.id }">
             <input v-model="j.flags_preset" type="radio" :value="p.id" />
-            <div class="grow"><div class="row" style="gap: 8px"><b>{{ p.name }}</b><span v-if="p.badge" class="badge" :class="p.badgeColor">{{ p.badge }}</span></div>
-              <div class="small muted">{{ p.desc }}</div></div>
+            <div class="grow"><div class="row" style="gap: 8px"><b>{{ $t(p.name) }}</b><span v-if="p.badge" class="badge" :class="p.badgeColor">{{ $t(p.badge) }}</span></div>
+              <div class="small muted">{{ $t(p.desc) }}</div></div>
           </label>
         </div>
       </section>
@@ -41,34 +41,34 @@
 
     <div class="col" style="gap: 16px">
       <section class="card">
-        <div class="card-head"><Terminal class="hi" /><h3>Dodatkowe argumenty</h3></div>
+        <div class="card-head"><Terminal class="hi" /><h3>{{ $t('Dodatkowe argumenty') }}</h3></div>
         <div class="card-body col" style="gap: 14px">
           <div class="field">
-            <label>Flagi JVM</label>
-            <textarea v-model="j.extra_jvm_args" class="textarea mono" rows="3" placeholder="-Dpaper.disableChannelLimit=true -XX:+UseLargePages" />
-            <span class="hint">Dodawane po flagach z presetu. Nieznane flagi -XX są bezpiecznie ignorowane.</span>
+            <label>{{ $t('Flagi JVM') }}</label>
+            <textarea v-model="j.extra_jvm_args" class="textarea mono" rows="3" :placeholder="$t('-Dpaper.disableChannelLimit=true -XX:+UseLargePages')" />
+            <span class="hint">{{ $t('Dodawane po flagach z presetu. Nieznane flagi -XX są bezpiecznie ignorowane.') }}</span>
           </div>
           <div class="field">
-            <label>Argumenty serwera</label>
-            <input v-model="j.extra_server_args" class="input mono" placeholder="--forceUpgrade" />
-            <span class="hint">Przekazywane do serwera po <span class="mono">nogui</span>.</span>
+            <label>{{ $t('Argumenty serwera') }}</label>
+            <input v-model="j.extra_server_args" class="input mono" :placeholder="$t('--forceUpgrade')" />
+            <span class="hint">{{ $t('Przekazywane do serwera po') }} <span class="mono">nogui</span>.</span>
           </div>
         </div>
       </section>
 
       <section class="card">
-        <div class="card-head"><SquareTerminal class="hi" /><h3>Komenda startowa</h3>
-          <button class="btn sm ghost" @click="copyCmd"><Copy /> Kopiuj</button></div>
+        <div class="card-head"><SquareTerminal class="hi" /><h3>{{ $t('Komenda startowa') }}</h3>
+          <button class="btn sm ghost" @click="copyCmd"><Copy /> {{ $t('Kopiuj') }}</button></div>
         <pre class="cmd"><span v-for="(a, i) in info.command" :key="i" :class="cls(a, i)">{{ a }} </span></pre>
-        <div class="card-body tiny muted" style="padding-top: 0">Podgląd odświeża się po zapisaniu. Zmiany obowiązują od następnego uruchomienia.</div>
+        <div class="card-body tiny muted" style="padding-top: 0">{{ $t('Podgląd odświeża się po zapisaniu. Zmiany obowiązują od następnego uruchomienia.') }}</div>
       </section>
     </div>
 
     <Transition name="fade">
       <div v-if="dirty" class="savebar card" style="grid-column: 1 / -1">
-        <span class="small">Niezapisane zmiany ustawień uruchamiania</span><span class="spacer" />
-        <button class="btn ghost" @click="reset">Odrzuć</button>
-        <button class="btn primary" :disabled="saving" @click="save"><Save /> Zapisz</button>
+        <span class="small">{{ $t('Niezapisane zmiany ustawień uruchamiania') }}</span><span class="spacer" />
+        <button class="btn ghost" @click="reset">{{ $t('Odrzuć') }}</button>
+        <button class="btn primary" :disabled="saving" @click="save"><Save /> {{ $t('Zapisz') }}</button>
       </div>
     </Transition>
   </div>

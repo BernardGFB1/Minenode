@@ -5,19 +5,19 @@
         <BrandMark />
         <div>
           <div class="brand-name">MineNode</div>
-          <div class="brand-sub">Minecraft server panel</div>
+          <div class="brand-sub">{{ $t('Minecraft server panel') }}</div>
         </div>
       </router-link>
 
       <nav class="nav">
-        <router-link to="/" class="nav-item" exact-active-class="active"><LayoutGrid /> Serwery</router-link>
-        <router-link to="/new" class="nav-item" active-class="active"><Plus /> Nowy serwer</router-link>
-        <router-link to="/modpacks" class="nav-item" active-class="active"><Package /> Modpacki</router-link>
-        <router-link to="/settings" class="nav-item" active-class="active"><Settings2 /> Ustawienia</router-link>
+        <router-link to="/" class="nav-item" exact-active-class="active"><LayoutGrid /> {{ $t('Serwery') }}</router-link>
+        <router-link to="/new" class="nav-item" active-class="active"><Plus /> {{ $t('Nowy serwer') }}</router-link>
+        <router-link to="/modpacks" class="nav-item" active-class="active"><Package /> {{ $t('Modpacki') }}</router-link>
+        <router-link to="/settings" class="nav-item" active-class="active"><Settings2 /> {{ $t('Ustawienia') }}</router-link>
       </nav>
 
       <div class="nav-section">
-        <div class="nav-label">Twoje serwery</div>
+        <div class="nav-label">{{ $t('Twoje serwery') }}</div>
         <div class="server-links">
           <router-link v-for="s in fleet.servers" :key="s.id" :to="`/servers/${s.id}`" class="server-link" active-class="active"
                        @click="ui.sidebarOpen = false">
@@ -25,21 +25,22 @@
             <span class="ellipsis grow">{{ s.name }}</span>
             <span v-if="s.state === 'online'" class="tiny muted num">{{ s.players_online }}/{{ s.max_players }}</span>
           </router-link>
-          <div v-if="fleet.loaded && !fleet.servers.length" class="tiny muted" style="padding: 4px 10px">Brak serwerów</div>
+          <div v-if="fleet.loaded && !fleet.servers.length" class="tiny muted" style="padding: 4px 10px">{{ $t('Brak serwerów') }}</div>
         </div>
       </div>
 
       <div class="sidebar-foot">
+        <LangSwitch class="lang-row" />
         <div class="user">
           <div class="avatar">{{ (auth.user || '?')[0].toUpperCase() }}</div>
           <div class="grow ellipsis">
             <div class="small" style="font-weight: 550">{{ auth.user }}</div>
             <div class="tiny muted">v{{ auth.version }}</div>
           </div>
-          <button class="btn ghost sm icon" :title="ui.theme === 'dark' ? 'Jasny motyw' : 'Ciemny motyw'" @click="toggleTheme">
+          <button class="btn ghost sm icon" :title="ui.theme === 'dark' ? $t('Jasny motyw') : $t('Ciemny motyw')" @click="toggleTheme">
             <Sun v-if="ui.theme === 'dark'" /><Moon v-else />
           </button>
-          <button class="btn ghost sm icon" title="Wyloguj" @click="logout"><LogOut /></button>
+          <button class="btn ghost sm icon" :title="$t('Wyloguj')" @click="logout"><LogOut /></button>
         </div>
       </div>
     </aside>
@@ -58,6 +59,7 @@ import { onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { LayoutGrid, Plus, Package, Settings2, LogOut, Sun, Moon, Menu } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
+import LangSwitch from './LangSwitch.vue'
 import { api } from '../api'
 import { auth, ui, toggleTheme } from '../store'
 import { fleet, useFleet } from '../servers'
@@ -103,6 +105,7 @@ async function logout() {
 .dot.red { background: var(--danger); }
 .dot.blue { background: var(--info); }
 .sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+.lang-row { margin: 0 4px 12px; }
 .user { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
 .avatar { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-3); display: grid; place-items: center; font-weight: 600; color: var(--accent); }
 .main { flex: 1; margin-left: var(--sidebar-w); min-width: 0; }

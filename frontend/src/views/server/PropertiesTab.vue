@@ -1,26 +1,26 @@
 <template>
   <div v-if="cur" class="col" style="gap: 16px">
-    <div v-if="!exists" class="callout info small"><Info />Plik server.properties zostanie w pełni wygenerowany przy pierwszym uruchomieniu. Możesz już teraz ustawić najważniejsze opcje.</div>
+    <div v-if="!exists" class="callout info small"><Info />{{ $t('Plik server.properties zostanie w pełni wygenerowany przy pierwszym uruchomieniu. Możesz już teraz ustawić najważniejsze opcje.') }}</div>
     <div class="layout">
       <nav class="side card">
         <a v-for="g in GROUPS" :key="g.id" :href="`#g-${g.id}`" class="side-link" @click.prevent="scrollTo(g.id)">
-          <component :is="icons[g.icon]" /> {{ g.title }}
+          <component :is="icons[g.icon]" /> {{ $t(g.title) }}
         </a>
-        <a href="#g-raw" class="side-link" @click.prevent="scrollTo('raw')"><Braces /> Wszystkie klucze</a>
+        <a href="#g-raw" class="side-link" @click.prevent="scrollTo('raw')"><Braces /> {{ $t('Wszystkie klucze') }}</a>
       </nav>
       <div class="col" style="gap: 16px; min-width: 0">
         <section v-for="g in GROUPS" :id="`g-${g.id}`" :key="g.id" class="card">
-          <div class="card-head"><component :is="icons[g.icon]" class="hi" /><h3>{{ g.title }}</h3></div>
+          <div class="card-head"><component :is="icons[g.icon]" class="hi" /><h3>{{ $t(g.title) }}</h3></div>
           <div class="card-body fields">
             <template v-for="f in g.fields" :key="f.key">
               <div v-if="visible(f)" class="field" :class="{ wide: f.wide || f.type === 'motd', boolf: f.type === 'bool' }">
                 <template v-if="f.type === 'bool'">
-                  <Toggle :model-value="val(f) === 'true'" :label="f.label" :hint="f.hint" @update:model-value="set(f.key, $event ? 'true' : 'false')" />
+                  <Toggle :model-value="val(f) === 'true'" :label="$t(f.label)" :hint="$t(f.hint || '')" @update:model-value="set(f.key, $event ? 'true' : 'false')" />
                 </template>
                 <template v-else>
-                  <label>{{ f.label }} <span class="key mono">{{ f.key }}</span></label>
+                  <label>{{ $t(f.label) }} <span class="key mono">{{ f.key }}</span></label>
                   <select v-if="f.type === 'select'" class="select" :value="val(f)" @change="set(f.key, $event.target.value)">
-                    <option v-for="[v, l] in f.options" :key="v" :value="v">{{ l }}</option>
+                    <option v-for="[v, l] in f.options" :key="v" :value="v">{{ $t(l) }}</option>
                     <option v-if="!f.options.some(([v]) => v === val(f))" :value="val(f)">{{ val(f) }}</option>
                   </select>
                   <div v-else-if="f.type === 'range'" class="row">
@@ -29,13 +29,13 @@
                   </div>
                   <template v-else-if="f.type === 'motd'">
                     <MotdEditor :model-value="val(f)" :max-lines="2" @update:model-value="set(f.key, $event)" />
-                    <div class="section-title" style="margin: 6px 0 0">Podgląd na liście serwerów</div>
+                    <div class="section-title" style="margin: 6px 0 0">{{ $t('Podgląd na liście serwerów') }}</div>
                     <ServerListEntry :name="live.summary.name" :motd="val(f)" :icon="live.summary.has_icon ? `/api/servers/${live.summary.id}/icon` : null"
                                      :players="`${live.summary.players_online}/${edits['max-players'] ?? cur['max-players'] ?? 20}`" />
                   </template>
                   <input v-else class="input" :class="{ mono: f.mono }" :type="f.type === 'number' ? 'number' : 'text'" :min="f.min" :max="f.max"
-                         :placeholder="f.placeholder" :value="val(f)" @input="set(f.key, $event.target.value)" />
-                  <span v-if="f.hint" class="hint">{{ f.hint }}</span>
+                         :placeholder="f.placeholder ? $t(f.placeholder) : ''" :value="val(f)" @input="set(f.key, $event.target.value)" />
+                  <span v-if="f.hint" class="hint">{{ $t(f.hint) }}</span>
                 </template>
               </div>
             </template>
@@ -43,22 +43,22 @@
         </section>
 
         <section id="g-raw" class="card">
-          <div class="card-head"><Braces class="hi" /><h3>Wszystkie klucze</h3><input v-model="rawFilter" class="input" style="width: 220px; height: 30px" placeholder="Filtruj…" /></div>
+          <div class="card-head"><Braces class="hi" /><h3>{{ $t('Wszystkie klucze') }}</h3><input v-model="rawFilter" class="input" style="width: 220px; height: 30px" :placeholder="$t('Filtruj…')" /></div>
           <table class="table raw">
             <tbody>
               <tr v-for="k in rawKeys" :key="k">
                 <td class="mono small" style="width: 40%">{{ k }}</td>
                 <td>
                   <input v-if="!managed.includes(k)" class="input mono" style="height: 30px" :value="edits[k] ?? cur[k]" @input="set(k, $event.target.value)" />
-                  <span v-else class="small muted mono">{{ cur[k] }} <span class="badge">zarządzane przez panel (proxy)</span></span>
+                  <span v-else class="small muted mono">{{ cur[k] }} <span class="badge">{{ $t('zarządzane przez panel (proxy)') }}</span></span>
                 </td>
               </tr>
             </tbody>
           </table>
           <form class="card-body row" style="border-top: 1px solid var(--border)" @submit.prevent="addKey">
-            <input v-model="newKey" class="input mono" placeholder="nowy-klucz" />
-            <input v-model="newVal" class="input mono" placeholder="wartość" />
-            <button class="btn" :disabled="!newKey"><Plus /> Dodaj</button>
+            <input v-model="newKey" class="input mono" :placeholder="$t('nowy-klucz')" />
+            <input v-model="newVal" class="input mono" :placeholder="$t('wartość')" />
+            <button class="btn" :disabled="!newKey"><Plus /> {{ $t('Dodaj') }}</button>
           </form>
         </section>
       </div>
@@ -66,10 +66,10 @@
 
     <Transition name="fade">
       <div v-if="dirty" class="savebar card">
-        <span class="small"><b>{{ Object.keys(edits).length }}</b> niezapisanych zmian</span>
+        <span class="small"><b>{{ Object.keys(edits).length }}</b> {{ $t('niezapisanych zmian') }}</span>
         <span class="spacer" />
-        <button class="btn ghost" @click="edits = {}">Odrzuć</button>
-        <button class="btn primary" :disabled="saving" @click="save"><Save /> Zapisz {{ live.summary.state === 'online' ? 'i uruchom ponownie' : '' }}</button>
+        <button class="btn ghost" @click="edits = {}">{{ $t('Odrzuć') }}</button>
+        <button class="btn primary" :disabled="saving" @click="save"><Save /> {{ live.summary.state === 'online' ? $t('Zapisz i uruchom ponownie') : $t('Zapisz') }}</button>
       </div>
     </Transition>
   </div>

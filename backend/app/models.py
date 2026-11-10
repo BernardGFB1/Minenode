@@ -60,6 +60,8 @@ class ServerConfig(BaseModel):
     proxy_protocol: bool = False
     restart_daily_at: Optional[str] = None  # "HH:MM"
     idle_shutdown_minutes: int = Field(default=0, ge=0, le=24 * 60)  # 0 = disabled
+    voice_enabled: bool = False  # Simple Voice Chat routed through the shared UDP proxy
+    voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None
@@ -104,7 +106,8 @@ class PanelSettings(BaseModel):
     default_server_id: Optional[str] = None
     curseforge_api_key: str = ""
     public_address: str = ""  # shown to users when no base domain is configured
-    public_panel_url: str = ""  # player-reachable panel URL (resource pack hosting)
+    public_panel_url: str = ""  # optional override for resource pack URLs (otherwise served on the Minecraft port)
+    pack_subdomain: str = "packs"  # resource packs: http://<pack_subdomain>.<base_domain>:<proxy port>/rp/…
     # What the proxy shows for servers that are not running. Placeholders:
     # {name} {motd} {address} {mc_version} {join_hint}
     motd_offline: str = "§f{name}\n§7● Serwer jest wyłączony{join_hint}"

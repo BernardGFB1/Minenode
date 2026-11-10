@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from starlette.websockets import WebSocketDisconnect
 
-from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks
+from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
 from .config import DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
@@ -193,6 +193,7 @@ async def system(_: str = Depends(auth.require_user)):
         "servers_online": sum(1 for i in insts if i.state == "online"),
         "players_online": sum(len(i.online) for i in insts),
         "proxy": manager.proxy.stats() if manager.proxy else None,
+        "voice": manager.voice.stats() if manager.voice else None,
     }
 
 
@@ -206,10 +207,12 @@ async def get_settings(_: str = Depends(auth.require_user)):
     d["proxy_port"] = PROXY_PORT
     d["defaults"] = {k: PanelSettings.model_fields[k].default for k in TEXT_SETTINGS}
     d["resource_pack_base"] = rpacks.public_base(manager)
+    from .config import VOICE_PORT
+    d["voice_port"] = VOICE_PORT
     return d
 
 
-TEXT_SETTINGS = ("public_panel_url", "motd_offline", "motd_starting", "version_offline", "version_starting",
+TEXT_SETTINGS = ("public_panel_url", "pack_subdomain", "motd_offline", "motd_starting", "version_offline", "version_starting",
                  "kick_offline", "kick_starting", "kick_waking")
 
 
@@ -219,6 +222,7 @@ class SettingsBody(BaseModel):
     curseforge_api_key: Optional[str] = None
     public_address: Optional[str] = None
     public_panel_url: Optional[str] = None
+    pack_subdomain: Optional[str] = Field(default=None, max_length=63)
     motd_offline: Optional[str] = Field(default=None, max_length=300)
     motd_starting: Optional[str] = Field(default=None, max_length=300)
     version_offline: Optional[str] = Field(default=None, max_length=80)
@@ -247,8 +251,13 @@ async def put_settings(body: SettingsBody, _: str = Depends(auth.require_user)):
         if val is not None:
             if key == "public_panel_url" and val.strip() and not re.match(r"^https?://[^\s/]+(/.*)?$", val.strip()):
                 raise HTTPException(400, "Publiczny adres panelu musi zaczynać się od http:// lub https://")
+            if key == "pack_subdomain":
+                val = val.strip().lower() or "packs"
+                if not re.match(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", val):
+                    raise HTTPException(400, "Niepoprawna subdomena paczek zasobów")
             setattr(s, key, val.strip() if key == "public_panel_url" else val)
     manager.save_settings(s)
+    rpacks.resync_urls(manager)
     return await get_settings("")
 
 
@@ -1240,3 +1249,60 @@ async def rp_public(sid: str, token: str, pid: str):
         raise HTTPException(404)
     return FileResponse(path, media_type="application/zip", filename=f"{pid}.zip",
                         headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ====================================================================== Simple Voice Chat
+
+def _voice_state(inst: ServerInstance) -> dict:
+    from .config import VOICE_PORT
+    supported = content.kind_for(inst.cfg.type) is not None
+    vp = manager.voice
+    host = voice.public_host(inst)
+    return {
+        "supported": supported, "installed": supported and voice.is_installed(inst),
+        "enabled": inst.cfg.voice_enabled, "internal_port": inst.cfg.voice_port, "public_port": VOICE_PORT,
+        "public_host": host, "voice_host": f"{host}:{VOICE_PORT}" if host else None,
+        "config_file": str(voice.config_path(inst).relative_to(inst.dir)),
+        "proxy_listening": bool(vp and vp.transport), "proxy_error": vp.error if vp else None,
+        "sessions": (vp.stats()["per_server"].get(inst.cfg.id, 0) if vp else 0), "running": inst.running,
+    }
+
+
+@router.get("/servers/{sid}/voice")
+async def voice_get(sid: str, _: str = Depends(auth.require_user)):
+    return _voice_state(inst_or_404(sid))
+
+
+class VoiceBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/servers/{sid}/voice")
+@run_errors
+async def voice_set(sid: str, body: VoiceBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    if body.enabled and not content.kind_for(inst.cfg.type):
+        raise HTTPException(400, "Simple Voice Chat wymaga silnika z modami lub pluginami")
+    inst.cfg.voice_enabled = body.enabled
+    if body.enabled and not inst.cfg.voice_port:
+        inst.cfg.voice_port = manager.allocate_voice_port()
+    manager.save_server(inst.cfg)
+    if body.enabled:
+        from .config import VOICE_PORT
+        voice.write_config(inst, VOICE_PORT)
+    return {**_voice_state(inst), "restart_required": inst.running}
+
+
+@router.post("/servers/{sid}/voice/install")
+@run_errors
+async def voice_install(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    ins = content.Installer(inst, cf_key())
+    await ins.modrinth(voice.SVC_PROJECT_ID)
+    if not inst.cfg.voice_enabled:
+        inst.cfg.voice_enabled = True
+        inst.cfg.voice_port = inst.cfg.voice_port or manager.allocate_voice_port()
+        manager.save_server(inst.cfg)
+    from .config import VOICE_PORT
+    voice.write_config(inst, VOICE_PORT)
+    return {**_voice_state(inst), "installed_files": ins.installed, "restart_required": inst.running}

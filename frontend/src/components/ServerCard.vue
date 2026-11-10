@@ -11,16 +11,16 @@
       <StatusBadge :state="s.state" />
     </div>
     <div class="motd small" v-html="mcToHtml(s.motd)" />
-    <button class="address mono small" title="Kopiuj adres" @click.stop="$emit('copy', s.address)">
-      <Globe /> <span class="ellipsis">{{ s.address }}</span> <Copy class="cp" />
+    <button class="address mono small" :title="$t('Kopiuj adres')" @click.stop="$emit('copy', s.address)">
+      <Globe /> <span class="ellipsis">{{ $addr(s.address) }}</span> <Copy class="cp" />
     </button>
     <div v-if="s.job" class="col" style="gap: 6px">
-      <div class="row tiny"><span class="text-2">{{ s.job.title }}</span><span class="muted ellipsis">{{ s.job.stage }}</span></div>
+      <div class="row tiny"><span class="text-2">{{ $tm(s.job.title) }}</span><span class="muted ellipsis">{{ $tm(s.job.stage) }}</span></div>
       <div class="progress" :class="{ indeterminate: s.job.progress == null }"><div :style="{ width: (s.job.progress || 0) * 100 + '%' }" /></div>
     </div>
     <div v-else class="metrics">
       <div>
-        <div class="tiny muted">Gracze</div>
+        <div class="tiny muted">{{ $t('Gracze') }}</div>
         <div class="num"><b>{{ s.players_online }}</b><span class="muted">/{{ s.max_players }}</span></div>
       </div>
       <div>
@@ -33,11 +33,11 @@
       </div>
     </div>
     <div class="foot" @click.stop>
-      <span class="tiny muted">{{ s.started_at ? 'działa ' + formatDuration(now - s.started_at) : s.installed ? 'zatrzymany' : '' }}</span>
+      <span class="tiny muted">{{ s.started_at ? $t('działa {t}', { t: formatDuration(now - s.started_at) }) : s.installed ? $t('zatrzymany') : '' }}</span>
       <span class="spacer" />
-      <button v-if="['offline', 'crashed'].includes(s.state)" class="btn sm" :disabled="!s.installed" @click="$emit('power', 'start')"><Play /> Start</button>
-      <button v-else-if="s.state === 'online' || s.state === 'starting'" class="btn sm" @click="$emit('power', 'stop')"><Square /> Stop</button>
-      <router-link :to="`/servers/${s.id}/console`" class="btn sm ghost"><TerminalSquare /> Konsola</router-link>
+      <button v-if="['offline', 'crashed'].includes(s.state)" class="btn sm" :disabled="!s.installed" @click="$emit('power', 'start')"><Play /> {{ $t('Start') }}</button>
+      <button v-else-if="s.state === 'online' || s.state === 'starting'" class="btn sm" @click="$emit('power', 'stop')"><Square /> {{ $t('Stop') }}</button>
+      <router-link :to="`/servers/${s.id}/console`" class="btn sm ghost"><TerminalSquare /> {{ $t('Konsola') }}</router-link>
     </div>
   </article>
 </template>

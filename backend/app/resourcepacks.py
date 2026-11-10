@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import net
-from .config import PANEL_PORT, TMP_DIR
+from .config import PROXY_PORT, TMP_DIR
 from .content import CF_CLASS, resolve_cf, resolve_modrinth
 from .modpacks import MODRINTH, ModpackError, _cf_cdn_urls, _cf_get
 from .properties import read_properties, update_properties
@@ -45,11 +45,30 @@ def save_index(inst: "ServerInstance", items: list[dict]) -> None:
 
 
 def public_base(m: "Manager") -> str | None:
+    """Packs are served by the Minecraft proxy on the game port, from their own subdomain."""
     s = m.settings
     if s.public_panel_url:
         return s.public_panel_url.rstrip("/")
-    host = s.base_domain or s.public_address
-    return f"http://{host}:{PANEL_PORT}" if host else None
+    if s.base_domain:
+        host = f"{s.pack_subdomain or 'packs'}.{s.base_domain}"
+    else:
+        host = s.public_address
+    return f"http://{host}:{PROXY_PORT}" if host else None
+
+
+def resync_urls(m: "Manager") -> int:
+    """Rewrite resource-pack URLs of active packs after the hosting address changed."""
+    changed = 0
+    for inst in m.instances.values():
+        pid = active_id(inst, m)
+        if not pid:
+            continue
+        pack, _ = get(inst, pid)
+        url = pack_url(m, inst, pack)
+        if url and read_properties(inst.dir / "server.properties").get("resource-pack") != url:
+            update_properties(inst.dir / "server.properties", {"resource-pack": url})
+            changed += 1
+    return changed
 
 
 def pack_url(m: "Manager", inst: "ServerInstance", pack: dict) -> str | None:
@@ -135,7 +154,7 @@ def get(inst: "ServerInstance", pid: str) -> tuple[dict, Path]:
 def active_id(inst: "ServerInstance", m: "Manager") -> str | None:
     url = read_properties(inst.dir / "server.properties").get("resource-pack", "")
     for p in load_index(inst):
-        if p["token"] in url and p["id"] in url:
+        if f"/rp/{inst.cfg.id}/{p['token']}/{p['id']}.zip" in url:
             return p["id"]
     return None
 

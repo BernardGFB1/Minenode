@@ -8,13 +8,14 @@
     </svg>
     <div v-if="hoverIdx >= 0 && points[hoverIdx]" class="tip" :style="{ left: `${(xs[hoverIdx] / w) * 100}%` }">
       <b class="num">{{ format(points[hoverIdx].v) }}</b>
-      <span class="muted">{{ new Date(points[hoverIdx].t * 1000).toLocaleTimeString('pl-PL') }}</span>
+      <span class="muted">{{ new Date(points[hoverIdx].t * 1000).toLocaleTimeString(dateLocale()) }}</span>
     </div>
-    <div v-if="!points.length" class="nodata muted small">Brak danych – serwer nie działa</div>
+    <div v-if="!points.length" class="nodata muted small">{{ $t('Brak danych – serwer nie działa') }}</div>
   </div>
 </template>
 <script setup>
 import { computed, ref } from 'vue'
+import { dateLocale } from '../i18n'
 const props = defineProps({
   points: { type: Array, default: () => [] }, // [{t, v}]
   max: { type: Number, default: null },

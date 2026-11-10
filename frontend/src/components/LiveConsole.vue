@@ -2,17 +2,17 @@
   <div class="console" :class="{ fill }">
     <div class="bar">
       <div class="row grow" style="gap: 6px">
-        <span class="badge" :class="connected ? 'green' : 'amber'"><span class="dot" />{{ connected ? 'Na żywo' : 'Łączenie…' }}</span>
-        <span class="tiny muted num">{{ lines.length }} linii</span>
+        <span class="badge" :class="connected ? 'green' : 'amber'"><span class="dot" />{{ connected ? $t('Na żywo') : $t('Łączenie…') }}</span>
+        <span class="tiny muted num">{{ $t('{n} linii', { n: lines.length }) }}</span>
       </div>
       <div class="search">
         <Search />
-        <input v-model="query" placeholder="Filtruj…" />
+        <input v-model="query" :placeholder="$t('Filtruj…')" />
       </div>
       <div class="btn-group">
-        <button class="btn sm" :class="{ active: levels.warn }" title="Tylko ostrzeżenia i błędy" @click="levels.warn = !levels.warn"><AlertTriangle /></button>
-        <button class="btn sm" :class="{ active: wrap }" title="Zawijanie linii" @click="wrap = !wrap"><WrapText /></button>
-        <button class="btn sm" title="Wyczyść widok" @click="clearView"><Eraser /></button>
+        <button class="btn sm" :class="{ active: levels.warn }" :title="$t('Tylko ostrzeżenia i błędy')" @click="levels.warn = !levels.warn"><AlertTriangle /></button>
+        <button class="btn sm" :class="{ active: wrap }" :title="$t('Zawijanie linii')" @click="wrap = !wrap"><WrapText /></button>
+        <button class="btn sm" :title="$t('Wyczyść widok')" @click="clearView"><Eraser /></button>
       </div>
     </div>
     <div ref="scroller" class="out" :class="{ wrap }" @scroll="onScroll">
@@ -20,14 +20,14 @@
         <span class="ts">{{ time(l.t) }}</span>
         <span class="tx" v-html="l.html" />
       </div>
-      <div v-if="!visible.length" class="muted small" style="padding: 12px">Konsola jest pusta.</div>
+      <div v-if="!visible.length" class="muted small" style="padding: 12px">{{ $t('Konsola jest pusta.') }}</div>
     </div>
-    <button v-if="!stick" class="jump btn sm" @click="toBottom"><ArrowDown /> Nowe linie</button>
+    <button v-if="!stick" class="jump btn sm" @click="toBottom"><ArrowDown /> {{ $t('Nowe linie') }}</button>
     <form class="input-row" @submit.prevent="submit">
       <ChevronRight class="prompt" />
-      <input ref="input" v-model="cmd" :disabled="!canSend" :placeholder="canSend ? 'Wpisz komendę (bez /), ↑↓ historia' : 'Serwer nie działa'"
+      <input ref="input" v-model="cmd" :disabled="!canSend" :placeholder="canSend ? $t('Wpisz komendę (bez /), ↑↓ historia') : $t('Serwer nie działa')"
              autocomplete="off" spellcheck="false" @keydown.up.prevent="hist(-1)" @keydown.down.prevent="hist(1)" />
-      <button class="btn sm primary" :disabled="!canSend || !cmd.trim()">Wyślij</button>
+      <button class="btn sm primary" :disabled="!canSend || !cmd.trim()">{{ $t('Wyślij') }}</button>
     </form>
   </div>
 </template>
@@ -35,6 +35,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { Search, AlertTriangle, WrapText, Eraser, ArrowDown, ChevronRight } from 'lucide-vue-next'
 import { ansiToHtml } from '../utils'
+import { i18n, tm, dateLocale } from '../i18n'
 
 const props = defineProps({ entries: Array, connected: Boolean, canSend: Boolean, fill: Boolean })
 const emit = defineEmits(['command'])
@@ -51,12 +52,13 @@ let hi = -1
 
 const LEVEL_RE = /\/(WARN|ERROR|FATAL)\]|\[(WARN|ERROR|FATAL)\]|^\s*(WARN|ERROR)\b/
 const cache = new Map()
+watch(() => i18n.locale, () => cache.clear())
 function decorate(e) {
   let d = cache.get(e.seq)
   if (!d) {
     const m = e.text.match(LEVEL_RE)
     const lvl = m ? (m[1] || m[2] || m[3]).toLowerCase() : ''
-    d = { ...e, level: lvl === 'fatal' ? 'error' : lvl, html: ansiToHtml(e.text) }
+    d = { ...e, level: lvl === 'fatal' ? 'error' : lvl, html: ansiToHtml(e.src === 'panel' ? tm(e.text) : e.text) }
     cache.set(e.seq, d)
     if (cache.size > 6000) cache.delete(cache.keys().next().value)
   }
@@ -64,11 +66,12 @@ function decorate(e) {
 }
 const lines = computed(() => props.entries.filter((e) => e.seq > clearedAt.value))
 const visible = computed(() => {
+  void i18n.locale
   const q = query.value.trim().toLowerCase()
   return lines.value.map(decorate).filter((l) => (!q || l.text.toLowerCase().includes(q)) && (!levels.warn || l.level))
     .slice(-2500)
 })
-const time = (t) => new Date(t * 1000).toLocaleTimeString('pl-PL', { hour12: false })
+const time = (t) => new Date(t * 1000).toLocaleTimeString(dateLocale(), { hour12: false })
 
 function onScroll() {
   const el = scroller.value

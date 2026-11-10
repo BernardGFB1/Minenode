@@ -2,25 +2,25 @@
   <div class="page">
     <div class="page-head">
       <div class="grow">
-        <h1>Nowy serwer</h1>
-        <div class="sub">Panel pobierze pliki serwera i odpowiednią wersję Javy automatycznie.</div>
+        <h1>{{ $t('Nowy serwer') }}</h1>
+        <div class="sub">{{ $t('Panel pobierze pliki serwera i odpowiednią wersję Javy automatycznie.') }}</div>
       </div>
-      <router-link to="/modpacks" class="btn"><Package /> Zamiast tego: modpack</router-link>
+      <router-link to="/modpacks" class="btn"><Package /> {{ $t('Zamiast tego: modpack') }}</router-link>
     </div>
 
     <div class="layout">
       <div class="col" style="gap: 16px">
         <section class="card">
-          <div class="card-head"><span class="step">1</span><h3>Silnik serwera</h3></div>
+          <div class="card-head"><span class="step">1</span><h3>{{ $t('Silnik serwera') }}</h3></div>
           <div class="card-body engines">
             <button v-for="(e, key) in engines" :key="key" type="button" class="engine" :class="{ active: form.type === key }" @click="form.type = key">
               <div class="etile" :style="{ background: ENGINE_META[key].color, color: ENGINE_META[key].ink || '#10140f' }">{{ ENGINE_META[key].letter }}</div>
               <div class="grow" style="min-width: 0">
                 <div class="row" style="gap: 6px"><b>{{ e.name }}</b>
-                  <span v-if="e.plugins" class="badge blue">Pluginy</span>
-                  <span v-if="e.mods" class="badge amber">Mody</span>
+                  <span v-if="e.plugins" class="badge blue">{{ $t('Pluginy') }}</span>
+                  <span v-if="e.mods" class="badge amber">{{ $t('Mody') }}</span>
                 </div>
-                <div class="small muted">{{ e.desc }}</div>
+                <div class="small muted">{{ $t(e.desc) }}</div>
               </div>
               <CheckCircle2 v-if="form.type === key" class="check" />
             </button>
@@ -28,36 +28,36 @@
         </section>
 
         <section class="card">
-          <div class="card-head"><span class="step">2</span><h3>Wersja Minecrafta</h3></div>
+          <div class="card-head"><span class="step">2</span><h3>{{ $t('Wersja Minecrafta') }}</h3></div>
           <div class="card-body">
             <VersionPicker :engine="form.type" v-model:mc="form.mc_version" v-model:loader="form.loader_version" />
           </div>
         </section>
 
         <section class="card">
-          <div class="card-head"><span class="step">3</span><h3>Szczegóły</h3></div>
+          <div class="card-head"><span class="step">3</span><h3>{{ $t('Szczegóły') }}</h3></div>
           <div class="card-body col" style="gap: 18px">
             <div class="grid grid-2">
               <div class="field">
-                <label>Nazwa serwera</label>
-                <input v-model="form.name" class="input" placeholder="np. Survival z ekipą" maxlength="64" />
+                <label>{{ $t('Nazwa serwera') }}</label>
+                <input v-model="form.name" class="input" :placeholder="$t('np. Survival z ekipą')" maxlength="64" />
               </div>
               <div class="field">
-                <label>Subdomena</label>
+                <label>{{ $t('Subdomena') }}</label>
                 <div class="input-group">
                   <input v-model="form.subdomain" class="input mono" :placeholder="autoSub || 'survival'" @input="subTouched = true" />
-                  <span class="addon">.{{ settings?.base_domain || 'twoja-domena' }}</span>
+                  <span class="addon">.{{ settings?.base_domain || $t('twoja-domena') }}</span>
                 </div>
-                <span class="hint">Gracze połączą się pod adresem <b class="mono">{{ address }}</b></span>
+                <span class="hint">{{ $t('Gracze połączą się pod adresem') }} <b class="mono">{{ address }}</b></span>
               </div>
             </div>
             <div class="field">
-              <label>Pamięć RAM</label>
+              <label>{{ $t('Pamięć RAM') }}</label>
               <RamPicker v-model:min="form.java.min_ram_mb" v-model:max="form.java.max_ram_mb" :total-bytes="sys?.mem_total" :other-bytes="otherBytes" />
             </div>
             <label class="eula">
               <input v-model="form.eula" type="checkbox" />
-              <span>Akceptuję <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener">Minecraft EULA</a>. Jest to wymagane przez Mojang do uruchomienia serwera.</span>
+              <span>{{ $t('Akceptuję') }} <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener">Minecraft EULA</a>{{ $t('. Jest to wymagane przez Mojang do uruchomienia serwera.') }}</span>
             </label>
           </div>
         </section>
@@ -65,19 +65,19 @@
 
       <aside class="summary card">
         <div class="card-body col" style="gap: 14px">
-          <h3>Podsumowanie</h3>
+          <h3>{{ $t('Podsumowanie') }}</h3>
           <dl>
-            <dt>Silnik</dt><dd>{{ engines[form.type]?.name }}</dd>
-            <dt>Wersja</dt><dd class="mono">{{ form.mc_version || '—' }}</dd>
-            <dt v-if="form.type !== 'vanilla'">Loader/build</dt><dd v-if="form.type !== 'vanilla'" class="mono">{{ form.loader_version || 'najnowszy' }}</dd>
+            <dt>{{ $t('Silnik') }}</dt><dd>{{ engines[form.type]?.name }}</dd>
+            <dt>{{ $t('Wersja') }}</dt><dd class="mono">{{ form.mc_version || '—' }}</dd>
+            <dt v-if="form.type !== 'vanilla'">{{ $t('Loader/build') }}</dt><dd v-if="form.type !== 'vanilla'" class="mono">{{ form.loader_version || $t('najnowszy') }}</dd>
             <dt>RAM</dt><dd>{{ formatMB(form.java.max_ram_mb) }}</dd>
-            <dt>Adres</dt><dd class="mono ellipsis">{{ address }}</dd>
+            <dt>{{ $t('Adres') }}</dt><dd class="mono ellipsis">{{ address }}</dd>
           </dl>
-          <div class="callout info small"><Coffee />Java zostanie dobrana automatycznie do wersji {{ form.mc_version || 'gry' }}.</div>
+          <div class="callout info small"><Coffee />{{ $t('Java zostanie dobrana automatycznie do wersji {v}.', { v: form.mc_version || $t('gry') }) }}</div>
           <button class="btn primary" style="height: 40px" :disabled="!valid || busy" @click="create">
-            <Loader2 v-if="busy" class="spin" /><Rocket v-else /> Utwórz i zainstaluj
+            <Loader2 v-if="busy" class="spin" /><Rocket v-else /> {{ $t('Utwórz i zainstaluj') }}
           </button>
-          <div v-if="!form.eula" class="tiny muted" style="text-align: center">Zaakceptuj EULA, aby kontynuować.</div>
+          <div v-if="!form.eula" class="tiny muted" style="text-align: center">{{ $t('Zaakceptuj EULA, aby kontynuować.') }}</div>
         </div>
       </aside>
     </div>
@@ -91,6 +91,7 @@ import VersionPicker from '../components/VersionPicker.vue'
 import RamPicker from '../components/RamPicker.vue'
 import { api } from '../api'
 import { toast, toastError } from '../store'
+import { t } from '../i18n'
 import { refreshFleet, fleet } from '../servers'
 import { ENGINE_META, formatMB, slugify } from '../utils'
 
@@ -108,7 +109,7 @@ const autoSub = computed(() => slugify(form.name))
 const address = computed(() => {
   const sub = form.subdomain || autoSub.value || 'serwer'
   const port = settings.value && settings.value.proxy_port !== 25565 ? `:${settings.value.proxy_port}` : ''
-  return `${sub}.${settings.value?.base_domain || settings.value?.public_address || 'twoja-domena'}${port}`
+  return `${sub}.${settings.value?.base_domain || settings.value?.public_address || t('twoja-domena')}${port}`
 })
 const otherBytes = computed(() => fleet.servers.reduce((a, s) => a + s.max_ram_mb * 1048576, 0))
 const valid = computed(() => form.name.trim() && form.mc_version && form.eula)
@@ -123,7 +124,7 @@ async function create() {
   busy.value = true
   try {
     const s = await api.post('/servers', { ...form, subdomain: form.subdomain || null })
-    toast(`Instalowanie serwera „${s.name}”…`, 'success')
+    toast(t('Instalowanie serwera „{name}”…', { name: s.name }), 'success')
     refreshFleet()
     router.push(`/servers/${s.id}/console`)
   } catch (e) {

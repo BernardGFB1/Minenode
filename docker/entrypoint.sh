@@ -9,7 +9,7 @@ if [ "$(id -u)" = "0" ]; then
   if [ "$(id -u minenode)" != "$PUID" ]; then usermod -o -u "$PUID" minenode; fi
   mkdir -p /data
   if [ "$(stat -c %u /data)" != "$PUID" ] || [ "$(stat -c %g /data)" != "$PGID" ]; then
-    echo "[minenode] Ustawianie właściciela /data na $PUID:$PGID…"
+    echo "[minenode] Setting owner of /data to $PUID:$PGID…"
     chown -R "$PUID:$PGID" /data
   fi
   export HOME=/home/minenode

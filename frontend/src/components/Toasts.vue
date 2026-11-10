@@ -5,7 +5,7 @@
         <CheckCircle2 v-if="t.kind === 'success'" />
         <AlertTriangle v-else-if="t.kind === 'error'" />
         <Info v-else />
-        <span>{{ t.message }}</span>
+        <span>{{ $tm(t.message) }}</span>
       </div>
     </TransitionGroup>
   </div>

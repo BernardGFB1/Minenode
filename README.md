@@ -1,55 +1,94 @@
 # MineNode
 
-![Pulpit MineNode – lista serwerów, zasoby hosta i proxy](docs/screenshots/dashboard.webp)
+![MineNode dashboard – servers, host resources and proxy](docs/screenshots/dashboard.webp)
 
-Samodzielnie hostowany panel do zarządzania serwerami Minecraft Java. Działa w jednym kontenerze Dockera i zawiera:
+A self-hosted panel for running Minecraft Java servers. It ships as a single Docker container and gives you:
 
-- **7 silników**: Vanilla, Paper, Purpur, Fabric, Quilt, Forge, NeoForge. Wersje i buildy są pobierane na żywo z oficjalnych API.
-- **Automatyczną Javę**: panel sam odczytuje z metadanych Mojang, jakiej Javy wymaga dana wersja gry, i pobiera Eclipse Temurin (8/11/17/21/25) przez Adoptium API.
-- **Wbudowany reverse proxy Minecraft**: wszystkie serwery działają na jednym porcie `25565`, a gracz trafia na właściwy serwer według subdomeny (`survival.mc.example.com`, `kreatywny.mc.example.com`, …).
-- **Import modpacków** z Modrinth (`.mrpack`) i CurseForge (manifest albo oficjalna paczka serwerowa), także z pliku wgranego przez przeglądarkę.
-- **Konsolę na żywo** (WebSocket) z kolorami ANSI, historią komend, filtrowaniem i wyróżnianiem WARN/ERROR.
-- **Monitoring**: CPU i RAM procesu (wykresy z 15 minut), gracze online, zasoby hosta i limit pamięci kontenera.
-- **Cykl życia**: start, stop (łagodny, przez `stop`), restart, kill, autostart, restart po awarii z ograniczeniem prób, start przy próbie dołączenia (*start on join*) i codzienny restart.
-- **Wyklikaną konfigurację**: edytor `server.properties` z podglądem MOTD i kodów `§`, ustawienia RAM i flag JVM (Aikar / ZGC) z podglądem komendy startowej.
-- **Graczy**: whitelistę z listą graczy, którzy próbowali wejść i nie są na liście (dodajesz ich jednym kliknięciem), nadawanie OP z poziomem, kick, ban i pardon.
-- **Menedżer plików**: przeglądanie, edycja tekstu, upload metodą drag&drop, rozpakowywanie ZIP oraz **pobranie wszystkich plików serwera jednym ZIP-em** (strumieniowo, bez plików tymczasowych).
-- **Kopie zapasowe**: spójne (`save-off` / `save-all flush`), z harmonogramem i retencją, do pobrania i przywrócenia.
-- **Mody i pluginy jednym kliknięciem**: wyszukiwarka Modrinth i CurseForge filtrowana pod silnik i wersję serwera. Panel sam doinstalowuje wymagane zależności.
-- **Weryfikację zgodności**: każdy plik w `mods/` lub `plugins/` jest identyfikowany po SHA-1 w Modrinth i sprawdzany pod kątem wersji gry i loadera. Panel podpowiada aktualizacje (także „Aktualizuj wszystko”), a przy każdym starcie serwera wypisuje w konsoli ostrzeżenia o niezgodnych plikach.
-- **Edytor MOTD WYSIWYG**: pogrubienie, kursywa, podkreślenie, przekreślenie, `§k`, 16 kolorów Minecrafta, znaki specjalne i cofanie zmian. Ma podgląd w stylu listy serwerów (z animacją `§k`) oraz tryb ręcznej edycji kodów `§`.
-- **Własny wygląd wyłączonych serwerów**: w ustawieniach panelu ustawiasz MOTD, etykietę wersji i komunikaty dla serwera wyłączonego i uruchamiającego się, ze zmiennymi `{name}`, `{motd}`, `{address}`, `{mc_version}` i `{join_hint}`.
-- **Auto-wyłączanie bez graczy**: serwer zatrzymuje się po N minutach bez graczy. Razem ze *startem przy dołączeniu* działa tylko wtedy, gdy ktoś gra.
-- **Hosting paczek zasobów**: wgrywasz ZIP albo pobierasz paczkę z Modrinth lub CurseForge. Panel sprawdza `pack.mcmeta` (i sam naprawia paczkę zapakowaną w folder), hostuje ją pod publicznym, niezgadywalnym adresem i jednym kliknięciem wpisuje URL oraz SHA-1 do `server.properties`.
+- **7 engines**: Vanilla, Paper, Purpur, Fabric, Quilt, Forge and NeoForge. Versions and builds come live from the official APIs.
+- **Automatic Java**: MineNode reads the required Java version from Mojang's metadata and downloads Eclipse Temurin (8/11/17/21/25) through the Adoptium API.
+- **A built-in Minecraft reverse proxy**: every server runs behind one port (`25565`), and players land on the right one by subdomain (`survival.mc.example.com`, `creative.mc.example.com`, …).
+- **Modpack import** from Modrinth (`.mrpack`) and CurseForge (manifest or official server pack), including uploaded files.
+- **One-click mods and plugins**: search Modrinth and CurseForge filtered to the server's engine and Minecraft version. Required dependencies are installed automatically.
+- **Compatibility checks**: every file in `mods/` or `plugins/` is identified on Modrinth by SHA-1 and checked against the game version and loader. MineNode suggests updates (including "Update all") and prints warnings about incompatible files in the console on every start.
+- **Resource pack hosting on the Minecraft port**: upload a ZIP or get a pack from Modrinth/CurseForge. MineNode validates `pack.mcmeta` (and fixes packs wrapped in a folder), serves the pack over port `25565` from its own subdomain (`packs.mc.example.com`), and writes the URL and SHA-1 into `server.properties` with one click. No extra port is needed.
+- **Simple Voice Chat for every server through one UDP port**: install SVC with one click. A shared UDP proxy (`24454`) routes each player to the right server by the player UUID that SVC puts in every packet.
+- **Live console** (WebSocket) with ANSI colours, command history, filtering and WARN/ERROR highlighting.
+- **Monitoring**: process CPU and RAM (15-minute charts), online players, host resources and the container memory limit.
+- **Lifecycle control**: start, graceful stop, restart and kill. Also autostart, crash auto-restart with backoff, start on join, a daily restart, and **auto-stop when nobody is online**.
+- **Point-and-click configuration**: a `server.properties` editor, RAM and JVM flags (Aikar / ZGC) with a live startup command preview.
+- **WYSIWYG MOTD editor**: bold, italic, underline, strikethrough, `§k`, the 16 Minecraft colours, special characters and undo/redo. It includes a server-list preview (with animated `§k`) and a raw `§` code mode.
+- **Custom offline/starting appearance**: set the MOTD, version label and kick messages for stopped, starting and waking servers, with `{name}`, `{motd}`, `{address}`, `{mc_version}` and `{join_hint}` placeholders.
+- **Players**: a whitelist that lists players who tried to join without being on it (add them in one click), OP with a permission level, kick, ban and pardon.
+- **File manager**: browse, edit text files, drag-and-drop upload, unzip, and **download every server file as one ZIP** (streamed, no temporary files).
+- **Backups**: consistent backups (`save-off` / `save-all flush`) with scheduling and retention, plus download and restore.
+- **English and Polish UI**: switch the language in the sidebar or on the login screen.
 
 ---
 
-## Szybki start
+## Quick start
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-Otwórz `http://<host>:8080`. Przy pierwszym wejściu kreator poprosi o utworzenie konta administratora.
+Open `http://<host>:8080`. On first visit a setup wizard asks you to create the administrator account, unless you set `MINENODE_ADMIN_USER` / `MINENODE_ADMIN_PASSWORD`.
 
-| Port | Do czego |
-|------|----------|
-| `8080/tcp` | Panel WWW + API + WebSocket |
-| `25565/tcp` | Minecraft: wspólny port wszystkich serwerów (proxy) |
+| Port | Purpose |
+|------|---------|
+| `8080/tcp` | Web panel, API and WebSocket |
+| `25565/tcp` | Minecraft: one shared port for every server (proxy), also serves resource packs |
+| `24454/udp` | Simple Voice Chat: one shared port for every server |
 
-Wszystkie dane (serwery, światy, Java, backupy, konfiguracja panelu) leżą w wolumenie `/data`.
+All data (servers, worlds, Java runtimes, backups, panel config) lives in the `/data` volume.
 
-### DNS i subdomeny
+### Deploying with Dockge / Portainer
 
-1. W **Ustawieniach panelu** ustaw *domenę bazową*, np. `mc.example.com`.
-2. W DNS dodaj rekord wildcard: `*.mc.example.com  A  <IP serwera>` (możesz też dodać `mc.example.com`).
-3. Każdy serwer ma własną subdomenę (np. `survival`), więc gracze łączą się pod `survival.mc.example.com`.
+The repository builds a single image, so you can paste the compose file into Dockge. To build straight from GitHub without uploading any files, use a remote build context:
 
-Gdy ktoś połączy się po samym IP albo pod nieznaną nazwą, trafi na *serwer domyślny* (ustawiany w panelu). Serwer możesz też podpiąć pod dowolną pełną domenę, np. `play.mojserwer.pl`, dodając ją jako *alias* w ustawieniach serwera.
+```yaml
+services:
+  minenode:
+    build:
+      context: https://github.com/BernardGFB1/Minenode.git#main
+    image: minenode:latest
+    container_name: minenode
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "25565:25565"
+      - "24454:24454/udp"
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: Europe/Warsaw
+    stop_grace_period: 2m
+```
 
-### HTTPS dla panelu
+### DNS and subdomains
 
-Panel najlepiej wystawić za reverse proxy HTTP (Caddy, Traefik, nginx) z TLS i ustawić `MINENODE_SECURE_COOKIES=true`. Przykład dla Caddy:
+1. In **Panel settings**, set the *base domain*, e.g. `mc.example.com`.
+2. Add a wildcard DNS record: `*.mc.example.com  A  <server IP>` (optionally also `mc.example.com`).
+3. Each server gets its own subdomain (e.g. `survival`), so players join `survival.mc.example.com`.
+
+Connections by IP or to an unknown name go to the *default server* (set in the panel). You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings.
+
+### Resource packs
+
+Players download packs straight from the Minecraft port: `http://packs.<base domain>:25565/rp/<server>/<token>/<id>.zip`. The proxy recognises plain HTTP requests on the game port, so no extra port or web server is required. The subdomain (`packs` by default) is configurable in **Panel settings**. If you prefer to serve packs through your own HTTPS reverse proxy, set the *custom resource pack host* there.
+
+### Simple Voice Chat
+
+Open **Server → Settings → Voice chat** and click *Install & enable*. MineNode:
+
+- installs Simple Voice Chat from Modrinth (mod or plugin, matching the engine);
+- gives the server a private internal voice port and binds it to `127.0.0.1`;
+- sets `voice_host` to `<server address>:24454`, so clients connect to the shared proxy.
+
+The proxy reads the player UUID at the start of every SVC packet and forwards it to the server that player is on. Open UDP `24454` on your firewall.
+
+### HTTPS for the panel
+
+Put the panel behind an HTTP reverse proxy (Caddy, Traefik, nginx) with TLS and set `MINENODE_SECURE_COOKIES=true`. For example, with Caddy:
 
 ```
 panel.example.com {
@@ -57,110 +96,114 @@ panel.example.com {
 }
 ```
 
-WebSockety działają bez dodatkowej konfiguracji. Port Minecrafta (`25565`) wystawiasz bezpośrednio.
-
-### Paczki zasobów
-
-Gracze pobierają paczkę bezpośrednio z panelu (`/rp/<serwer>/<token>/<id>.zip`, bez logowania). W *Ustawieniach panelu* ustaw **Publiczny adres panelu**, czyli adres osiągalny dla graczy, np. `https://panel.example.com` albo `http://mc.example.com:8080`. Bez tego panel spróbuje wyliczyć adres z domeny bazowej i portu panelu.
+WebSockets work out of the box. Expose the Minecraft (`25565/tcp`) and voice (`24454/udp`) ports directly.
 
 ### CurseForge
 
-CurseForge wymaga własnego, darmowego klucza API z [console.curseforge.com](https://console.curseforge.com/). Wklej go w *Ustawieniach panelu* albo ustaw zmienną `CURSEFORGE_API_KEY`. Modrinth nie wymaga klucza.
+CurseForge needs your own free API key from [console.curseforge.com](https://console.curseforge.com/). Paste it into **Panel settings** or set `CURSEFORGE_API_KEY`. Modrinth works without a key.
 
-Niektórzy autorzy blokują pobieranie swoich modów przez API. Panel wypisze w konsoli listę takich plików, a Ty wgrasz je ręcznie do `mods/` w menedżerze plików.
-
----
-
-## Zmienne środowiskowe
-
-| Zmienna | Domyślnie | Opis |
-|---------|-----------|------|
-| `MINENODE_PORT` | `8080` | Port panelu |
-| `MINENODE_PROXY_PORT` | `25565` | Publiczny port Minecrafta (proxy) |
-| `MINENODE_INTERNAL_PORT_START` | `25600` | Pierwszy port wewnętrzny serwerów (przydzielane automatycznie) |
-| `MINENODE_DATA` | `/data` | Katalog danych |
-| `MINENODE_ADMIN_USER` / `MINENODE_ADMIN_PASSWORD` | – | Konto tworzone przy pierwszym starcie (zamiast kreatora) |
-| `MINENODE_SECURE_COOKIES` | `false` | Ciasteczka tylko przez HTTPS |
-| `CURSEFORGE_API_KEY` | – | Klucz API CurseForge |
-| `PUID` / `PGID` | `1000` | Użytkownik, na którym działa panel i serwery |
-| `TZ` | `Europe/Warsaw` | Strefa czasowa (codzienne restarty, backupy) |
+Some authors block API downloads of their files. MineNode lists those files in the console so you can upload them to `mods/` with the file manager.
 
 ---
 
-## Architektura
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MINENODE_PORT` | `8080` | Panel port |
+| `MINENODE_PROXY_PORT` | `25565` | Public Minecraft port (proxy) |
+| `MINENODE_VOICE_PORT` | `24454` | Public Simple Voice Chat UDP port |
+| `MINENODE_INTERNAL_PORT_START` | `25600` | First internal game port (assigned automatically) |
+| `MINENODE_INTERNAL_VOICE_PORT_START` | `24500` | First internal voice port (assigned automatically) |
+| `MINENODE_DATA` | `/data` | Data directory |
+| `MINENODE_ADMIN_USER` / `MINENODE_ADMIN_PASSWORD` | – | Account created on first start (instead of the wizard) |
+| `MINENODE_SECURE_COOKIES` | `false` | Send session cookies over HTTPS only |
+| `CURSEFORGE_API_KEY` | – | CurseForge API key |
+| `PUID` / `PGID` | `1000` | User the panel and servers run as |
+| `TZ` | `Europe/Warsaw` | Time zone (daily restarts, backups) |
+
+---
+
+## Architecture
 
 ```
-                 ┌──────────────────────── kontener minenode ───────────────────────────┐
- przeglądarka ──▶│ :8080  FastAPI ── REST /api/*  ── WebSocket /api/servers/{id}/ws       │
-                 │          │            Vue 3 SPA (statyczne pliki)                       │
-                 │          ▼                                                             │
-                 │      Manager ── ServerInstance × N ── java -Xmx… -jar …  (:25600, :25601…)
-                 │          │            ▲  stdin/stdout (konsola, komendy, parsowanie logów)
- gracz MC  ─────▶│ :25565 MinecraftProxy ┘  handshake → hostname → właściwy port wewnętrzny  │
-                 │          │                                                             │
-                 │   Java (Temurin, auto)   Providers (Mojang/Paper/Purpur/Fabric/…)      │
-                 │   Backups (zip)          Modpacks (Modrinth / CurseForge)              │
-                 └──────────────────────────────── /data ─────────────────────────────────┘
+                 ┌──────────────────────────── minenode container ───────────────────────────┐
+ browser ───────▶│ :8080  FastAPI ── REST /api/* ── WebSocket /api/servers/{id}/ws            │
+                 │          │           Vue 3 SPA (static files)                              │
+                 │          ▼                                                                 │
+                 │      Manager ── ServerInstance × N ── java -Xmx… -jar …  (:25600, :25601…)  │
+                 │          │            ▲  stdin/stdout (console, commands, log parsing)      │
+ Minecraft ─────▶│ :25565 MinecraftProxy ┘  handshake → hostname → internal port               │
+                 │          └─ HTTP GET /rp/… → resource pack files                           │
+ voice (UDP) ───▶│ :24454 VoiceProxy ── player UUID → server's internal SVC port (:24500…)    │
+                 │   Java (Temurin, auto)   Providers (Mojang/Paper/Purpur/Fabric/…)          │
+                 │   Backups (zip)          Modpacks & content (Modrinth / CurseForge)        │
+                 └──────────────────────────────────── /data ─────────────────────────────────┘
 ```
 
 **Backend** (`backend/app`, Python 3.12, FastAPI, asyncio):
 
-| Moduł | Rola |
-|-------|------|
-| `main.py` | Aplikacja, cykl życia (łagodne zatrzymanie serwerów przy `docker stop`), CSRF, serwowanie SPA |
-| `api.py` | REST + WebSocket |
-| `manager.py` | Procesy serwerów, konsola, metryki (psutil), parsowanie logów (gracze, odrzucenia z whitelisty), harmonogram |
-| `proxy.py` | Proxy TCP rozumiejące protokół Minecrafta: parsuje Handshake/Login Start, routuje po hoście, generuje własny status/disconnect dla wyłączonych serwerów, opcjonalnie PROXY protocol v2 |
-| `providers.py` | Wykrywanie wersji i instalacja silników (w tym instalatorów Forge/NeoForge/Quilt) |
-| `java.py` | Dobór i pobieranie Javy z Adoptium |
-| `modpacks.py` | Modrinth `.mrpack`, CurseForge manifest i server pack, import z pliku |
-| `backups.py` | Spójne kopie ZIP, retencja, przywracanie z wycofaniem zmian przy błędzie |
-| `players.py` | whitelist/ops/bans JSON, UUID z Mojang lub offline |
-| `files.py` | Bezpieczne ścieżki, strumieniowy ZIP |
-| `content.py` | Mody i pluginy: wyszukiwanie, instalacja z zależnościami, inwentarz, weryfikacja zgodności i aktualizacje |
-| `resourcepacks.py` | Biblioteka paczek zasobów, publiczny hosting, aktywacja w `server.properties` |
-| `auth.py` | Hasła scrypt, sesje podpisane HMAC (httpOnly, SameSite=Strict), limit prób logowania |
+| Module | Role |
+|--------|------|
+| `main.py` | App and lifecycle (graceful server shutdown on `docker stop`), CSRF, SPA serving |
+| `api.py` | REST + WebSocket endpoints |
+| `manager.py` | Server processes, console, metrics (psutil), log parsing (players, whitelist rejections), scheduler, idle shutdown |
+| `proxy.py` | Minecraft-aware TCP proxy: parses Handshake/Login Start, routes by host, answers for offline servers, optional PROXY protocol v2, serves resource packs over HTTP on the same port |
+| `voice.py` | UDP proxy for Simple Voice Chat (routing by player UUID) and SVC config management |
+| `providers.py` | Version discovery and engine installation (incl. Forge/NeoForge/Quilt installers) |
+| `java.py` | Java selection and download from Adoptium |
+| `modpacks.py` | Modrinth `.mrpack`, CurseForge manifests and server packs, file import |
+| `content.py` | Mods & plugins: search, install with dependencies, inventory, compatibility checks, updates |
+| `resourcepacks.py` | Resource pack library, hosting, `server.properties` activation |
+| `backups.py` | Consistent ZIP backups, retention, restore with rollback on failure |
+| `players.py` | whitelist/ops/bans JSON, UUIDs from Mojang or offline mode |
+| `files.py` | Safe paths, streamed ZIP downloads |
+| `auth.py` | scrypt passwords, HMAC-signed sessions (httpOnly, SameSite=Strict), login rate limiting |
 
-**Frontend** (`frontend/`, Vue 3 + Vite, bez frameworka UI): własny system designu z jasnym i ciemnym motywem, ikonami Lucide i fontami Inter oraz JetBrains Mono, wbudowanymi w paczkę (bez zewnętrznych CDN).
+**Frontend** (`frontend/`, Vue 3 + Vite, no UI framework): a custom design system with light and dark themes, Lucide icons, and Inter / JetBrains Mono / Pixelify Sans fonts bundled locally (no external CDNs).
 
-### Układ `/data`
+**Translations**: Polish source strings are the keys (`$t('…')`) and `frontend/src/locales/en.js` holds the English dictionary. Messages coming from the backend are matched against templates in the same file. A missing translation falls back to Polish, so new features never break the UI.
+
+### `/data` layout
 
 ```
 /data
-├── servers/<id>/          # pliki serwera (świat, mods/, plugins/, server.properties…)
-│   └── .minenode/        # metadane panelu: content.json (mody/pluginy), resourcepacks/
-├── backups/<id>/*.zip     # kopie zapasowe + metadane .json
-├── java/temurin-<N>/      # pobrane środowiska Java
+├── servers/<id>/          # server files (world, mods/, plugins/, server.properties…)
+│   └── .minenode/         # panel metadata: content.json (mods/plugins), resourcepacks/
+├── backups/<id>/*.zip     # backups + .json metadata
+├── java/temurin-<N>/      # downloaded Java runtimes
 ├── panel/                 # servers.json, settings.json, users.json, secret.key, players/
-└── tmp/                   # pliki tymczasowe instalacji
+└── tmp/                   # temporary install files
 ```
 
 ---
 
-## Rozwój lokalny
+## Local development
 
 ```bash
 # backend
 cd backend && python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
-MINENODE_DATA=./data MINENODE_PROXY_PORT=25599 uvicorn app.main:app --reload --port 8080
+MINENODE_DATA=./data MINENODE_PROXY_PORT=25599 MINENODE_VOICE_PORT=24499 uvicorn app.main:app --reload --port 8080
 
-# frontend (proxy /api → :8080, z hot reload)
+# frontend (proxies /api to :8080, hot reload)
 cd frontend && npm install && npm run dev
 ```
 
-Dokumentacja API (OpenAPI): `http://localhost:8080/api/docs`.
+API docs (OpenAPI): `http://localhost:8080/api/docs`.
 
 ---
 
-## Bezpieczeństwo
+## Security
 
-- Panel uruchamia serwery jako nieuprzywilejowany użytkownik (`PUID`/`PGID`), nigdy jako root.
-- Zapytania zmieniające stan wymagają nagłówka `X-Requested-With` (ochrona CSRF), WebSocket sprawdza `Origin`.
-- Ścieżki w menedżerze plików, archiwach modpacków i backupach są sprawdzane pod kątem wyjścia poza katalog (zip-slip).
-- Do serwerów dodawana jest flaga `-Dlog4j2.formatMsgNoLookups=true` (ochrona starszych wersji przed Log4Shell).
+- The panel runs servers as an unprivileged user (`PUID`/`PGID`), never as root.
+- State-changing requests require an `X-Requested-With` header (CSRF protection), and the WebSocket checks `Origin`.
+- Paths in the file manager, modpack archives and backups are checked against directory traversal (zip-slip).
+- Resource pack URLs contain an unguessable token, and the voice ports of individual servers are bound to `127.0.0.1`.
+- Servers start with `-Dlog4j2.formatMsgNoLookups=true` (Log4Shell protection for older versions).
+- If you set `MINENODE_ADMIN_PASSWORD` in a public compose file, change the password in the panel after the first login.
 
-## Ograniczenia
+## Limitations
 
-- Obsługiwana jest tylko Java Edition. Bedrock używa UDP i nie ma w protokole nazwy hosta.
-- Stary ping listy serwerów sprzed 1.7 nie jest routowany.
-- Przy włączonym proxy serwer widzi IP `127.0.0.1`. Aby przekazać prawdziwe IP graczy, włącz *PROXY protocol* w ustawieniach serwera i jego obsługę po stronie serwera (np. Paper: `proxies.proxy-protocol: true`).
+- Java Edition only. Bedrock uses UDP and has no hostname in its protocol.
+- The pre-1.7 legacy server list ping is not routed.
+- Behind the proxy, servers see players as `127.0.0.1`. To pass real IPs, enable *PROXY protocol* in the server settings and on the server side (e.g. Paper: `proxies.proxy-protocol: true`).

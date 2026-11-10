@@ -2,44 +2,44 @@
   <div class="col" style="gap: 16px">
     <div v-if="kind === null" class="card empty-card">
       <Puzzle class="big" />
-      <h2>Vanilla nie obsługuje modów ani pluginów</h2>
-      <p class="muted">Zmień silnik na Paper/Purpur (pluginy) albo Fabric, Quilt, Forge lub NeoForge (mody) w
-        <router-link :to="`/servers/${id}/settings`">Ustawieniach serwera</router-link>. Świat zostanie zachowany.</p>
+      <h2>{{ $t('Vanilla nie obsługuje modów ani pluginów') }}</h2>
+      <p class="muted">{{ $t('Zmień silnik na Paper/Purpur (pluginy) albo Fabric, Quilt, Forge lub NeoForge (mody) w') }}
+        <router-link :to="`/servers/${id}/settings`">{{ $t('Ustawieniach serwera') }}</router-link>{{ $t('. Świat zostanie zachowany.') }}</p>
     </div>
 
     <template v-else-if="kind">
       <div class="row wrap" style="gap: 12px">
         <div class="seg">
-          <button :class="{ active: view === 'installed' }" @click="view = 'installed'"><Package /> Zainstalowane <span class="cnt">{{ items.length }}</span></button>
-          <button :class="{ active: view === 'browse' }" @click="openBrowse"><Search /> Przeglądaj</button>
+          <button :class="{ active: view === 'installed' }" @click="view = 'installed'"><Package /> {{ $t('Zainstalowane') }} <span class="cnt">{{ items.length }}</span></button>
+          <button :class="{ active: view === 'browse' }" @click="openBrowse"><Search /> {{ $t('Przeglądaj') }}</button>
         </div>
-        <span class="small muted">{{ label }} dla <b class="text-2">{{ ENGINE_META[engine]?.name }} {{ mc }}</b> · folder <span class="mono">{{ dir }}/</span></span>
+        <span class="small muted">{{ $t('{what} dla', { what: label }) }} <b class="text-2">{{ ENGINE_META[engine]?.name }} {{ mc }}</b> {{ $t('· folder') }} <span class="mono">{{ dir }}/</span></span>
         <span class="spacer" />
         <template v-if="view === 'installed'">
-          <button class="btn sm" :disabled="checking" @click="load(true)"><Loader2 v-if="checking" class="spin" /><ShieldCheck v-else /> Sprawdź zgodność</button>
-          <button v-if="updates.length" class="btn sm primary" :disabled="busy.all" @click="updateAll"><Loader2 v-if="busy.all" class="spin" /><ArrowUpCircle v-else /> Aktualizuj wszystko ({{ updates.length }})</button>
+          <button class="btn sm" :disabled="checking" @click="load(true)"><Loader2 v-if="checking" class="spin" /><ShieldCheck v-else /> {{ $t('Sprawdź zgodność') }}</button>
+          <button v-if="updates.length" class="btn sm primary" :disabled="busy.all" @click="updateAll"><Loader2 v-if="busy.all" class="spin" /><ArrowUpCircle v-else /> {{ $t('Aktualizuj wszystko ({n})', { n: updates.length }) }}</button>
         </template>
       </div>
 
       <div v-if="restartNeeded" class="callout warn small">
-        <RotateCcw /><div class="grow">Zmiany w {{ label.toLowerCase() }} zadziałają po restarcie serwera.</div>
-        <button class="btn sm" @click="restart">Restartuj teraz</button>
+        <RotateCcw /><div class="grow">{{ $t(kind === 'plugin' ? 'Zmiany w pluginach zadziałają po restarcie serwera.' : 'Zmiany w modach zadziałają po restarcie serwera.') }}</div>
+        <button class="btn sm" @click="restart">{{ $t('Restartuj teraz') }}</button>
       </div>
 
       <!-- ===================== installed -->
       <template v-if="view === 'installed'">
         <div v-if="items.length" class="row wrap" style="gap: 8px">
-          <span class="badge green"><CheckCircle2 class="bi" /> {{ counts.ok }} zgodnych</span>
-          <span v-if="counts.warn" class="badge amber"><AlertTriangle class="bi" /> {{ counts.warn }} niepotwierdzonych</span>
-          <span v-if="counts.bad" class="badge red"><XCircle class="bi" /> {{ counts.bad }} niezgodnych</span>
-          <span v-if="counts.unknown" class="badge"><HelpCircle class="bi" /> {{ counts.unknown }} nieznanych</span>
+          <span class="badge green"><CheckCircle2 class="bi" /> {{ $t('{n} zgodnych', { n: counts.ok }) }}</span>
+          <span v-if="counts.warn" class="badge amber"><AlertTriangle class="bi" /> {{ $t('{n} niepotwierdzonych', { n: counts.warn }) }}</span>
+          <span v-if="counts.bad" class="badge red"><XCircle class="bi" /> {{ $t('{n} niezgodnych', { n: counts.bad }) }}</span>
+          <span v-if="counts.unknown" class="badge"><HelpCircle class="bi" /> {{ $t('{n} nieznanych', { n: counts.unknown }) }}</span>
         </div>
-        <div v-if="counts.bad" class="callout warn small"><AlertTriangle /><div>Część plików nie jest przeznaczona dla {{ ENGINE_META[engine]?.name }} {{ mc }} – serwer może się nie uruchomić. Zaktualizuj je, wyłącz lub usuń.</div></div>
+        <div v-if="counts.bad" class="callout warn small"><AlertTriangle /><div>{{ $t('Część plików nie jest przeznaczona dla {what} – serwer może się nie uruchomić. Zaktualizuj je, wyłącz lub usuń.', { what: `${ENGINE_META[engine]?.name} ${mc}` }) }}</div></div>
         <section class="card">
           <div v-if="loading" class="empty"><Loader2 class="spin" /></div>
           <div v-else-if="!items.length" class="empty">
-            <Puzzle /><div>Brak zainstalowanych {{ kind === 'plugin' ? 'pluginów' : 'modów' }}.</div>
-            <button class="btn primary" style="margin-top: 12px" @click="openBrowse"><Search /> Znajdź {{ kind === 'plugin' ? 'pluginy' : 'mody' }}</button>
+            <Puzzle /><div>{{ $t(kind === 'plugin' ? 'Brak zainstalowanych pluginów.' : 'Brak zainstalowanych modów.') }}</div>
+            <button class="btn primary" style="margin-top: 12px" @click="openBrowse"><Search /> {{ $t(kind === 'plugin' ? 'Znajdź pluginy' : 'Znajdź mody') }}</button>
           </div>
           <div v-else class="list">
             <div v-for="it in items" :key="it.file" class="item" :class="{ disabled: !it.enabled }">
@@ -48,19 +48,19 @@
               <div class="grow" style="min-width: 0">
                 <div class="row" style="gap: 8px">
                   <b class="ellipsis">{{ it.title }}</b>
-                  <span v-if="it.dependency" class="badge">zależność</span>
-                  <span v-if="!it.enabled" class="badge">wyłączony</span>
+                  <span v-if="it.dependency" class="badge">{{ $t('zależność') }}</span>
+                  <span v-if="!it.enabled" class="badge">{{ $t('wyłączony') }}</span>
                 </div>
                 <div class="tiny muted ellipsis"><span v-if="it.version_number">{{ it.version_number }} · </span><span class="mono">{{ it.file }}</span> · {{ formatBytes(it.size) }}</div>
               </div>
-              <span v-if="it.compat" class="badge" :class="COMPAT[it.compat].color" :title="it.reason">
-                <component :is="COMPAT[it.compat].icon" class="bi" /> {{ COMPAT[it.compat].label }}
+              <span v-if="it.compat" class="badge" :class="COMPAT[it.compat].color" :title="$tm(it.reason)">
+                <component :is="COMPAT[it.compat].icon" class="bi" /> {{ $t(COMPAT[it.compat].label) }}
               </span>
-              <button v-if="it.update" class="btn sm" :disabled="busy[it.file]" :title="`Aktualizuj do ${it.update.version_number}`" @click="update(it)">
-                <Loader2 v-if="busy[it.file]" class="spin" /><ArrowUpCircle v-else /> {{ it.update.version_number.length > 18 ? 'Aktualizuj' : it.update.version_number }}
+              <button v-if="it.update" class="btn sm" :disabled="busy[it.file]" :title="$t('Aktualizuj do {v}', { v: it.update.version_number })" @click="update(it)">
+                <Loader2 v-if="busy[it.file]" class="spin" /><ArrowUpCircle v-else /> {{ it.update.version_number.length > 18 ? $t('Aktualizuj') : it.update.version_number }}
               </button>
               <Toggle :model-value="it.enabled" @update:model-value="toggle(it, $event)" />
-              <button class="btn sm ghost icon" title="Usuń" @click="remove(it)"><Trash2 /></button>
+              <button class="btn sm ghost icon" :title="$t('Usuń')" @click="remove(it)"><Trash2 /></button>
             </div>
           </div>
         </section>
@@ -75,12 +75,12 @@
           </div>
           <div class="searchbox grow">
             <Search />
-            <input v-model="q" :placeholder="kind === 'plugin' ? 'Szukaj pluginów, np. LuckPerms, EssentialsX…' : 'Szukaj modów, np. Lithium, Create, JEI…'" @keydown.enter="search(true)" />
+            <input v-model="q" :placeholder="kind === 'plugin' ? $t('Szukaj pluginów, np. LuckPerms, EssentialsX…') : $t('Szukaj modów, np. Lithium, Create, JEI…')" @keydown.enter="search(true)" />
           </div>
-          <Toggle v-model="anyVersion" label="Wszystkie wersje" @update:model-value="search(true)" />
+          <Toggle v-model="anyVersion" :label="$t('Wszystkie wersje')" @update:model-value="search(true)" />
         </div>
-        <div v-if="source === 'curseforge' && !cfOk" class="callout warn small"><KeyRound />CurseForge wymaga klucza API – dodaj go w <router-link to="/settings">Ustawieniach panelu</router-link>.</div>
-        <div v-else-if="error" class="callout warn small"><AlertTriangle />{{ error }}</div>
+        <div v-if="source === 'curseforge' && !cfOk" class="callout warn small"><KeyRound />{{ $t('CurseForge wymaga klucza API – dodaj go w') }} <router-link to="/settings">{{ $t('Ustawieniach panelu') }}</router-link>.</div>
+        <div v-else-if="error" class="callout warn small"><AlertTriangle />{{ $tm(error) }}</div>
         <div v-if="searching && !results.length" class="empty"><Loader2 class="spin" /></div>
         <div class="results">
           <article v-for="r in results" :key="r.id" class="card res">
@@ -88,24 +88,24 @@
             <div v-else class="ric ph"><Puzzle /></div>
             <div class="grow" style="min-width: 0">
               <div class="row" style="gap: 6px"><a :href="r.url" target="_blank" rel="noopener" class="title ellipsis" @click.stop>{{ r.title }}</a></div>
-              <div class="tiny muted ellipsis">{{ r.author ? 'od ' + r.author : '' }}</div>
+              <div class="tiny muted ellipsis">{{ r.author ? $t('od {who}', { who: r.author }) : '' }}</div>
               <p class="small text-2 desc">{{ r.description }}</p>
               <div class="row wrap" style="gap: 5px; margin-top: 8px">
                 <span class="badge"><Download class="bi" /> {{ compact(r.downloads) }}</span>
                 <span v-for="c in r.categories" :key="c" class="badge">{{ c }}</span>
-                <span v-if="r.server_side === 'required'" class="badge blue">wymagany na serwerze</span>
+                <span v-if="r.server_side === 'required'" class="badge blue">{{ $t('wymagany na serwerze') }}</span>
               </div>
             </div>
             <div class="act">
-              <span v-if="r.installed" class="badge green"><Check class="bi" /> Zainstalowano</span>
-              <button v-else class="btn sm primary" :disabled="busy[r.id]" @click="install(r)"><Loader2 v-if="busy[r.id]" class="spin" /><Plus v-else /> Zainstaluj</button>
+              <span v-if="r.installed" class="badge green"><Check class="bi" /> {{ $t('Zainstalowano') }}</span>
+              <button v-else class="btn sm primary" :disabled="busy[r.id]" @click="install(r)"><Loader2 v-if="busy[r.id]" class="spin" /><Plus v-else /> {{ $t('Zainstaluj') }}</button>
             </div>
           </article>
         </div>
         <div v-if="results.length && results.length < total" class="row" style="justify-content: center">
-          <button class="btn" :disabled="searching" @click="search(false)"><Loader2 v-if="searching" class="spin" /> Pokaż więcej</button>
+          <button class="btn" :disabled="searching" @click="search(false)"><Loader2 v-if="searching" class="spin" /> {{ $t('Pokaż więcej') }}</button>
         </div>
-        <div v-if="!searching && !results.length && !error && (source === 'modrinth' || cfOk)" class="empty small">Brak wyników{{ anyVersion ? '' : ` dla ${mc} – spróbuj „Wszystkie wersje”` }}.</div>
+        <div v-if="!searching && !results.length && !error && (source === 'modrinth' || cfOk)" class="empty small">{{ anyVersion ? $t('Brak wyników.') : $t('Brak wyników dla {mc} – spróbuj „Wszystkie wersje”.', { mc }) }}</div>
       </template>
     </template>
     <div v-else class="empty"><Loader2 class="spin" /></div>
@@ -118,6 +118,7 @@ import Toggle from '../../components/Toggle.vue'
 import { api } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
 import { ENGINE_META, compact, formatBytes } from '../../utils'
+import { t } from '../../i18n'
 
 const live = inject('live')
 const id = live.summary.id
@@ -145,7 +146,7 @@ const total = ref(0)
 const searching = ref(false)
 const error = ref('')
 const cfOk = ref(true)
-const label = computed(() => (kind.value === 'plugin' ? 'Pluginy' : 'Mody'))
+const label = computed(() => t(kind.value === 'plugin' ? 'Pluginy' : 'Mody'))
 const counts = computed(() => items.value.reduce((a, i) => ((a[i.compat || 'unknown'] = (a[i.compat || 'unknown'] || 0) + 1), a), { ok: 0, warn: 0, bad: 0, unknown: 0 }))
 const updates = computed(() => items.value.filter((i) => i.update))
 
@@ -189,7 +190,7 @@ async function install(r) {
     const res = await api.post(`/servers/${id}/content/install`, { source: r.source, project_id: r.id })
     const deps = res.installed.filter((i) => i.dependency)
     const warn = res.installed.some((i) => i.compat !== 'ok')
-    toast(`Zainstalowano ${r.title}${deps.length ? ` + ${deps.length} zależn. (${deps.map((d) => d.title).join(', ')})` : ''}${warn ? ' – wersja niepotwierdzona dla ' + mc.value : ''}`, warn ? 'info' : 'success', 5000)
+    toast(t('Zainstalowano {name}', { name: r.title }) + (deps.length ? ' + ' + t('{n} zależn.', { n: deps.length }) + ` (${deps.map((d) => d.title).join(', ')})` : '') + (warn ? ' – ' + t('wersja niepotwierdzona dla {mc}', { mc: mc.value }) : ''), warn ? 'info' : 'success', 5000)
     r.installed = true
     afterChange(res)
     load(true)
@@ -197,17 +198,17 @@ async function install(r) {
 }
 async function update(it) {
   busy[it.file] = true
-  try { afterChange(await api.post(`/servers/${id}/content/update`, { file: it.file })); toast(`Zaktualizowano ${it.title}`, 'success'); await load(true) } catch (e) { toastError(e) } finally { busy[it.file] = false }
+  try { afterChange(await api.post(`/servers/${id}/content/update`, { file: it.file })); toast(t('Zaktualizowano {name}', { name: it.title }), 'success'); await load(true) } catch (e) { toastError(e) } finally { busy[it.file] = false }
 }
 async function updateAll() {
   busy.all = true
-  try { const r = await api.post(`/servers/${id}/content/update-all`); afterChange(r); toast(`Zaktualizowano ${r.installed.length} plików`, 'success'); await load(true) } catch (e) { toastError(e) } finally { busy.all = false }
+  try { const r = await api.post(`/servers/${id}/content/update-all`); afterChange(r); toast(t('Zaktualizowano plików: {n}', { n: r.installed.length }), 'success'); await load(true) } catch (e) { toastError(e) } finally { busy.all = false }
 }
 async function toggle(it, enabled) {
   try { afterChange(await api.post(`/servers/${id}/content/toggle`, { file: it.file, enabled })); it.enabled = enabled } catch (e) { toastError(e) }
 }
 async function remove(it) {
-  if (!(await confirmDialog({ title: `Usunąć ${it.title}?`, message: it.file, confirmText: 'Usuń', danger: true }))) return
+  if (!(await confirmDialog({ title: t('Usunąć {name}?', { name: it.title }), message: it.file, confirmText: t('Usuń'), danger: true }))) return
   try { afterChange(await api.del(`/servers/${id}/content/${encodeURIComponent(it.file)}`)); items.value = items.value.filter((x) => x !== it) } catch (e) { toastError(e) }
 }
 async function restart() {

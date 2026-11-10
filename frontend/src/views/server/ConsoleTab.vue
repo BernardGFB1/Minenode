@@ -2,8 +2,8 @@
   <div class="col" style="gap: 12px">
     <LiveConsole ref="con" :entries="live.console" :connected="live.connected" :can-send="canSend" fill @command="send" />
     <div class="row wrap" style="gap: 6px">
-      <span class="tiny muted">Szybkie komendy:</span>
-      <button v-for="q in quick" :key="q.c" class="chip" :disabled="!canSend" @click="send(q.c)">{{ q.l }}</button>
+      <span class="tiny muted">{{ $t('Szybkie komendy:') }}</span>
+      <button v-for="q in quick" :key="q.c" class="chip" :disabled="!canSend" @click="send(q.c)">{{ $t(q.l) }}</button>
     </div>
   </div>
 </template>

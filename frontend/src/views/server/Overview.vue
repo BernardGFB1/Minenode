@@ -2,22 +2,22 @@
   <div class="col" style="gap: 16px">
     <div class="grid grid-4">
       <div class="card tile">
-        <div class="tl"><Timer /> Czas działania</div>
+        <div class="tl"><Timer /> {{ $t('Czas działania') }}</div>
         <div class="tv num">{{ s.started_at ? formatDuration(now - s.started_at) : '—' }}</div>
-        <div class="tiny muted">{{ s.state === 'crashed' ? `ostatni kod wyjścia: ${s.exit_code}` : stateText }}</div>
+        <div class="tiny muted">{{ s.state === 'crashed' ? $t('ostatni kod wyjścia: {code}', { code: s.exit_code }) : $t(stateText) }}</div>
       </div>
       <div class="card tile">
-        <div class="tl"><Users /> Gracze</div>
+        <div class="tl"><Users /> {{ $t('Gracze') }}</div>
         <div class="tv num">{{ s.players_online }}<small> / {{ s.max_players }}</small></div>
         <Meter :value="s.players_online / (s.max_players || 1)" />
       </div>
       <div class="card tile">
         <div class="tl"><Cpu /> CPU</div>
         <div class="tv num">{{ running ? Math.round(s.cpu) : '—' }}<small v-if="running">%</small></div>
-        <div class="tiny muted">100% = 1 rdzeń · host ma {{ cpuCount }}</div>
+        <div class="tiny muted">{{ $t('100% = 1 rdzeń · host ma {n}', { n: cpuCount }) }}</div>
       </div>
       <div class="card tile">
-        <div class="tl"><MemoryStick /> Pamięć procesu</div>
+        <div class="tl"><MemoryStick /> {{ $t('Pamięć procesu') }}</div>
         <div class="tv num">{{ running && s.mem ? formatBytes(s.mem) : '—' }}</div>
         <Meter :value="s.mem / (s.max_ram_mb * 1048576 * 1.15)" />
       </div>
@@ -25,44 +25,44 @@
 
     <div class="grid grid-2">
       <div class="card">
-        <div class="card-head"><h3>Obciążenie CPU</h3><span class="tiny muted">ostatnie {{ windowLabel }}</span></div>
+        <div class="card-head"><h3>{{ $t('Obciążenie CPU') }}</h3><span class="tiny muted">{{ $t('ostatnie {w}', { w: windowLabel }) }}</span></div>
         <div class="card-body"><AreaChart :points="cpuPts" :window="windowSec" :format="(v) => v.toFixed(0) + '%'" /></div>
       </div>
       <div class="card">
-        <div class="card-head"><h3>Zużycie pamięci</h3><span class="tiny muted">limit sterty {{ formatMB(s.max_ram_mb) }}</span></div>
+        <div class="card-head"><h3>{{ $t('Zużycie pamięci') }}</h3><span class="tiny muted">{{ $t('limit sterty {v}', { v: formatMB(s.max_ram_mb) }) }}</span></div>
         <div class="card-body"><AreaChart :points="memPts" :window="windowSec" :max="s.max_ram_mb * 1048576 * 1.2" color="var(--info)" :format="(v) => formatBytes(v)" /></div>
       </div>
     </div>
 
     <div class="grid" style="grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr)">
       <div class="card">
-        <div class="card-head"><h3>Ostatnie logi</h3><router-link :to="`/servers/${s.id}/console`" class="btn sm ghost">Otwórz konsolę <ArrowRight /></router-link></div>
+        <div class="card-head"><h3>{{ $t('Ostatnie logi') }}</h3><router-link :to="`/servers/${s.id}/console`" class="btn sm ghost">{{ $t('Otwórz konsolę') }} <ArrowRight /></router-link></div>
         <div class="tail mono">
-          <div v-for="l in tail" :key="l.seq" class="tl-line" :class="l.src" v-html="ansiToHtml(l.text)" />
-          <div v-if="!tail.length" class="muted small">Brak logów.</div>
+          <div v-for="l in tail" :key="l.seq" class="tl-line" :class="l.src" v-html="ansiToHtml(l.src === 'panel' ? $tm(l.text) : l.text)" />
+          <div v-if="!tail.length" class="muted small">{{ $t('Brak logów.') }}</div>
         </div>
       </div>
       <div class="col" style="gap: 16px">
         <div class="card">
-          <div class="card-head"><h3>Online teraz</h3><router-link :to="`/servers/${s.id}/players`" class="btn sm ghost">Gracze <ArrowRight /></router-link></div>
+          <div class="card-head"><h3>{{ $t('Online teraz') }}</h3><router-link :to="`/servers/${s.id}/players`" class="btn sm ghost">{{ $t('Gracze') }} <ArrowRight /></router-link></div>
           <div class="card-body">
-            <div v-if="!s.players?.length" class="muted small">Nikt nie gra.</div>
+            <div v-if="!s.players?.length" class="muted small">{{ $t('Nikt nie gra.') }}</div>
             <div v-else class="row wrap" style="gap: 8px">
               <span v-for="p in s.players" :key="p" class="player"><img :src="`https://mc-heads.net/avatar/${p}/24`" alt="" referrerpolicy="no-referrer" />{{ p }}</span>
             </div>
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><h3>Informacje</h3></div>
+          <div class="card-head"><h3>{{ $t('Informacje') }}</h3></div>
           <dl class="info">
-            <dt>Adres</dt><dd class="mono">{{ s.address }}</dd>
-            <dt>Silnik</dt><dd>{{ ENGINE_META[s.type]?.name }} {{ s.mc_version }}</dd>
-            <dt v-if="s.loader_version">Loader / build</dt><dd v-if="s.loader_version" class="mono">{{ s.loader_version }}</dd>
-            <dt>Java</dt><dd>{{ s.java_feature ? `Temurin ${s.java_feature}` : `wymagana ${s.required_java || '?'}+` }}</dd>
-            <dt>Tryb online</dt><dd>{{ s.online_mode ? 'tak (konta premium)' : 'nie (offline/cracked)' }}</dd>
-            <dt>Whitelista</dt><dd>{{ s.whitelist ? 'włączona' : 'wyłączona' }}</dd>
-            <dt>Port wewnętrzny</dt><dd class="mono">{{ s.internal_port }}</dd>
-            <dt>Rozmiar na dysku</dt><dd class="num">{{ disk != null ? formatBytes(disk) : '…' }}</dd>
+            <dt>{{ $t('Adres') }}</dt><dd class="mono">{{ $addr(s.address) }}</dd>
+            <dt>{{ $t('Silnik') }}</dt><dd>{{ ENGINE_META[s.type]?.name }} {{ s.mc_version }}</dd>
+            <dt v-if="s.loader_version">{{ $t('Loader / build') }}</dt><dd v-if="s.loader_version" class="mono">{{ s.loader_version }}</dd>
+            <dt>Java</dt><dd>{{ s.java_feature ? `Temurin ${s.java_feature}` : $t('wymagana {j}+', { j: s.required_java || '?' }) }}</dd>
+            <dt>{{ $t('Tryb online') }}</dt><dd>{{ s.online_mode ? $t('tak (konta premium)') : $t('nie (offline/cracked)') }}</dd>
+            <dt>{{ $t('Whitelista') }}</dt><dd>{{ s.whitelist ? $t('włączona') : $t('wyłączona') }}</dd>
+            <dt>{{ $t('Port wewnętrzny') }}</dt><dd class="mono">{{ s.internal_port }}</dd>
+            <dt>{{ $t('Rozmiar na dysku') }}</dt><dd class="num">{{ disk != null ? formatBytes(disk) : '…' }}</dd>
           </dl>
         </div>
       </div>

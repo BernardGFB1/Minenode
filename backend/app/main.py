@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import APP_NAME, PROXY_HOST, PROXY_PORT, STATIC_DIR, VERSION, ensure_dirs
+from .config import APP_NAME, PROXY_HOST, PROXY_PORT, STATIC_DIR, VERSION, VOICE_HOST, VOICE_PORT, ensure_dirs
 
 ensure_dirs()
 
@@ -17,6 +17,7 @@ from . import api, auth, net  # noqa: E402  (data dirs must exist first)
 from .backups import BackupManager  # noqa: E402
 from .manager import Manager  # noqa: E402
 from .proxy import MinecraftProxy  # noqa: E402
+from .voice import VoiceProxy  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
 log = logging.getLogger("minenode")
@@ -28,8 +29,10 @@ async def lifespan(app: FastAPI):
     manager = Manager()
     manager.backups = BackupManager(manager)
     manager.proxy = MinecraftProxy(manager, PROXY_HOST, PROXY_PORT)
+    manager.voice = VoiceProxy(manager, VOICE_HOST, VOICE_PORT)
     api.manager = manager
     await manager.proxy.start()
+    await manager.voice.start()
     await manager.startup()
     log.info("%s %s ready – %d server(s) configured", APP_NAME, VERSION, len(manager.instances))
     try:
@@ -38,6 +41,7 @@ async def lifespan(app: FastAPI):
         log.info("Shutting down – stopping servers gracefully…")
         await manager.shutdown()
         await manager.proxy.stop()
+        await manager.voice.stop()
         await net.close()
 
 

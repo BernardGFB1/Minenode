@@ -2,9 +2,9 @@
   <div class="ram">
     <div class="row" style="align-items: baseline">
       <div class="big num">{{ formatMB(max) }}</div>
-      <div class="muted small">maksymalnie (-Xmx)</div>
+      <div class="muted small">{{ $t('maksymalnie (-Xmx)') }}</div>
       <div class="spacer" />
-      <div class="small text-2 num">start: {{ formatMB(Math.min(min, max)) }}</div>
+      <div class="small text-2 num">{{ $t('start: {v}', { v: formatMB(Math.min(min, max)) }) }}</div>
     </div>
     <input type="range" :min="512" :max="limit" step="256" :value="max" @input="setMax(+$event.target.value)" />
     <div class="row wrap" style="gap: 6px">
@@ -16,22 +16,22 @@
         <div class="seg mine" :class="{ over: overcommit }" :style="{ width: pct(max) }" />
       </div>
       <div class="row tiny muted">
-        <span><i class="sw other" /> inne serwery {{ formatMB(otherMb) }}</span>
-        <span><i class="sw mine" /> ten serwer {{ formatMB(max) }}</span>
+        <span><i class="sw other" /> {{ $t('inne serwery {v}', { v: formatMB(otherMb) }) }}</span>
+        <span><i class="sw mine" /> {{ $t('ten serwer {v}', { v: formatMB(max) }) }}</span>
         <span class="spacer" />
-        <span>dostępne: {{ formatMB(totalMb) }}</span>
+        <span>{{ $t('dostępne: {v}', { v: formatMB(totalMb) }) }}</span>
       </div>
       <div v-if="overcommit" class="callout warn small" style="margin-top: 6px">
-        <AlertTriangle />Suma przydziałów przekracza pamięć hosta/kontenera – serwery mogą zostać zabite przez OOM.
+        <AlertTriangle />{{ $t('Suma przydziałów przekracza pamięć hosta/kontenera – serwery mogą zostać zabite przez OOM.') }}
       </div>
     </div>
     <details class="advanced">
-      <summary class="small text-2">Pamięć startowa (-Xms)</summary>
+      <summary class="small text-2">{{ $t('Pamięć startowa (-Xms)') }}</summary>
       <div class="row" style="margin-top: 8px">
         <input type="range" :min="256" :max="max" step="256" :value="Math.min(min, max)" @input="$emit('update:min', +$event.target.value)" />
-        <button type="button" class="chip" @click="$emit('update:min', max)">= maks.</button>
+        <button type="button" class="chip" @click="$emit('update:min', max)">{{ $t('= maks.') }}</button>
       </div>
-      <div class="hint tiny muted">Przy flagach Aikara zalecane jest Xms = Xmx (stała sterta, mniej pauz GC).</div>
+      <div class="hint tiny muted">{{ $t('Przy flagach Aikara zalecane jest Xms = Xmx (stała sterta, mniej pauz GC).') }}</div>
     </details>
   </div>
 </template>

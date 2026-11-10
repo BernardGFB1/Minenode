@@ -4,18 +4,18 @@
     <section class="stats-section">
       <div class="page-head">
         <div class="grow">
-          <h1>Statystyki</h1>
-          <div class="sub">{{ fleet.servers.length }} skonfigurowanych · {{ sys?.servers_online ?? 0 }} online · {{ sys?.players_online ?? 0 }} graczy</div>
+          <h1>{{ $t('Statystyki') }}</h1>
+          <div class="sub">{{ $t('{n} skonfigurowanych · {on} online · {p} graczy', { n: fleet.servers.length, on: sys?.servers_online ?? 0, p: sys?.players_online ?? 0 }) }}</div>
         </div>
       </div>
 
       <div class="grid grid-4">
         <div v-for="m in metrics" :key="m.key" class="card stat">
-          <div class="stat-label"><component :is="m.icon" /> {{ m.label }}</div>
-          <div class="stat-value num">{{ m.value }}<small v-if="m.unit">{{ m.unit }}</small></div>
+          <div class="stat-label"><component :is="m.icon" /> {{ $t(m.label) }}</div>
+          <div class="stat-value num">{{ m.value }}<small v-if="m.unit">{{ $t(m.unit) }}</small></div>
           <Meter v-if="m.meter != null" :value="m.meter" />
-          <div v-else class="row tiny" :style="{ color: m.ok ? 'var(--muted)' : 'var(--danger)' }"><span class="dot" :style="{ background: m.ok ? 'var(--accent)' : 'var(--danger)' }" />{{ m.status }}</div>
-          <div class="tiny muted">{{ m.hint }}</div>
+          <div v-else class="row tiny" :style="{ color: m.ok ? 'var(--muted)' : 'var(--danger)' }"><span class="dot" :style="{ background: m.ok ? 'var(--accent)' : 'var(--danger)' }" />{{ $tm(m.status) }}</div>
+          <div class="tiny muted">{{ $tm(m.hint) }}</div>
         </div>
       </div>
     </section>
@@ -23,35 +23,35 @@
     <!-- ============================================================ SERVERS -->
     <section class="servers-section">
       <div class="servers-head">
-        <h2>Serwery</h2>
+        <h2>{{ $t('Serwery') }}</h2>
         <span class="badge">{{ fleet.servers.length }}</span>
         <div class="seg" role="tablist">
           <button v-for="f in FILTERS" :key="f.id" :class="{ active: filter === f.id }" @click="filter = f.id">
-            {{ f.label }} <span class="cnt">{{ counts[f.id] }}</span>
+            {{ $t(f.label) }} <span class="cnt">{{ counts[f.id] }}</span>
           </button>
         </div>
         <div class="searchbox">
-          <Search /><input v-model="query" placeholder="Szukaj serwera…" />
+          <Search /><input v-model="query" :placeholder="$t('Szukaj serwera…')" />
         </div>
         <span class="spacer" />
         <div class="seg icons">
-          <button :class="{ active: view === 'grid' }" title="Kafelki" @click="view = 'grid'"><LayoutGrid /></button>
-          <button :class="{ active: view === 'list' }" title="Lista" @click="view = 'list'"><List /></button>
+          <button :class="{ active: view === 'grid' }" :title="$t('Kafelki')" @click="view = 'grid'"><LayoutGrid /></button>
+          <button :class="{ active: view === 'list' }" :title="$t('Lista')" @click="view = 'list'"><List /></button>
         </div>
-        <router-link to="/modpacks" class="btn"><Package /> Importuj modpack</router-link>
-        <router-link to="/new" class="btn primary"><Plus /> Nowy serwer</router-link>
+        <router-link to="/modpacks" class="btn"><Package /> {{ $t('Importuj modpack') }}</router-link>
+        <router-link to="/new" class="btn primary"><Plus /> {{ $t('Nowy serwer') }}</router-link>
       </div>
 
       <div v-if="fleet.loaded && !fleet.servers.length" class="onboarding">
         <Boxes class="big-icon" />
-        <h2>Utwórz swój pierwszy serwer</h2>
-        <p class="muted">Wybierz silnik (Vanilla, Paper, Fabric, Forge…) i wersję – panel pobierze pliki serwera i właściwą Javę automatycznie.</p>
+        <h2>{{ $t('Utwórz swój pierwszy serwer') }}</h2>
+        <p class="muted">{{ $t('Wybierz silnik (Vanilla, Paper, Fabric, Forge…) i wersję – panel pobierze pliki serwera i właściwą Javę automatycznie.') }}</p>
         <div class="row" style="justify-content: center; margin-top: 18px">
-          <router-link to="/modpacks" class="btn"><Package /> Z modpacka</router-link>
-          <router-link to="/new" class="btn primary"><Plus /> Nowy serwer</router-link>
+          <router-link to="/modpacks" class="btn"><Package /> {{ $t('Z modpacka') }}</router-link>
+          <router-link to="/new" class="btn primary"><Plus /> {{ $t('Nowy serwer') }}</router-link>
         </div>
       </div>
-      <div v-else-if="fleet.loaded && !shown.length" class="empty small">Brak serwerów pasujących do filtra.</div>
+      <div v-else-if="fleet.loaded && !shown.length" class="empty small">{{ $t('Brak serwerów pasujących do filtra.') }}</div>
 
       <div v-if="view === 'grid'" class="servers">
         <ServerCard v-for="s in shown" :key="s.id" :s="s" :now="now" @power="(a) => power(s, a)" @copy="copy" />
@@ -61,7 +61,7 @@
           <ServerAvatar :server="s" :size="36" />
           <div class="grow" style="min-width: 0">
             <b class="ellipsis">{{ s.name }}</b>
-            <div class="tiny muted ellipsis">{{ ENGINE_META[s.type]?.name }} {{ s.mc_version !== '?' ? s.mc_version : '' }} · <span class="mono">{{ s.address }}</span></div>
+            <div class="tiny muted ellipsis">{{ ENGINE_META[s.type]?.name }} {{ s.mc_version !== '?' ? s.mc_version : '' }} · <span class="mono">{{ $addr(s.address) }}</span></div>
           </div>
           <StatusBadge :state="s.state" />
           <span class="col-m num small"><b>{{ s.players_online }}</b><span class="muted">/{{ s.max_players }}</span></span>
@@ -71,9 +71,9 @@
             <Meter :value="s.mem / (s.max_ram_mb * 1048576 * 1.15)" />
           </div>
           <div class="row" style="gap: 4px" @click.stop>
-            <button v-if="['offline', 'crashed'].includes(s.state)" class="btn sm icon" title="Start" :disabled="!s.installed" @click="power(s, 'start')"><Play /></button>
-            <button v-else-if="s.state === 'online' || s.state === 'starting'" class="btn sm icon" title="Stop" @click="power(s, 'stop')"><Square /></button>
-            <router-link :to="`/servers/${s.id}/console`" class="btn sm ghost icon" title="Konsola"><TerminalSquare /></router-link>
+            <button v-if="['offline', 'crashed'].includes(s.state)" class="btn sm icon" :title="$t('Start')" :disabled="!s.installed" @click="power(s, 'start')"><Play /></button>
+            <button v-else-if="s.state === 'online' || s.state === 'starting'" class="btn sm icon" :title="$t('Stop')" @click="power(s, 'stop')"><Square /></button>
+            <router-link :to="`/servers/${s.id}/console`" class="btn sm ghost icon" :title="$t('Konsola')"><TerminalSquare /></router-link>
           </div>
         </div>
       </div>

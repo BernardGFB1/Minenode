@@ -2,7 +2,7 @@
   <span class="badge" :class="meta.color">
     <Loader2 v-if="busy" class="spin" style="width: 12px; height: 12px" />
     <span v-else class="dot" />
-    {{ meta.label }}
+    {{ $t(meta.label) }}
   </span>
 </template>
 <script setup>

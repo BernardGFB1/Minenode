@@ -2,14 +2,14 @@
   <div class="vp">
     <div class="row">
       <div class="input-group grow">
-        <input v-model="filter" class="input" placeholder="Szukaj wersji, np. 1.21" />
-        <span class="addon">{{ filtered.length }} wersji</span>
+        <input v-model="filter" class="input" :placeholder="$t('Szukaj wersji, np. 1.21')" />
+        <span class="addon">{{ $t('{n} wersji', { n: filtered.length }) }}</span>
       </div>
-      <Toggle v-if="engine === 'vanilla' || engine === 'fabric' || engine === 'quilt'" v-model="snapshots" label="Snapshoty" />
+      <Toggle v-if="engine === 'vanilla' || engine === 'fabric' || engine === 'quilt'" v-model="snapshots" :label="$t('Snapshoty')" />
     </div>
     <div class="versions" :class="{ loading }">
-      <div v-if="loading" class="empty small"><Loader2 class="spin" />Pobieranie listy wersji…</div>
-      <div v-else-if="error" class="empty small" style="color: var(--danger)">{{ error }}</div>
+      <div v-if="loading" class="empty small"><Loader2 class="spin" />{{ $t('Pobieranie listy wersji…') }}</div>
+      <div v-else-if="error" class="empty small" style="color: var(--danger)">{{ $tm(error) }}</div>
       <template v-else>
         <button v-for="v in filtered" :key="v.id" type="button" class="vchip" :class="{ active: v.id === mc, pre: !v.stable }" @click="$emit('update:mc', v.id)">
           {{ v.id }}
@@ -19,7 +19,7 @@
     <div v-if="engine !== 'vanilla' && mc" class="field">
       <label>{{ loaderLabel }}</label>
       <select class="select" :value="loader || ''" @change="$emit('update:loader', $event.target.value || null)">
-        <option value="">Najnowsza stabilna (zalecane)</option>
+        <option value="">{{ $t('Najnowsza stabilna (zalecane)') }}</option>
         <option v-for="l in loaders" :key="l.id" :value="l.id">{{ l.id }}{{ l.recommended ? ' – recommended' : !l.stable ? ' – beta' : '' }}</option>
       </select>
     </div>
@@ -30,6 +30,7 @@ import { computed, ref, watch } from 'vue'
 import { Loader2 } from 'lucide-vue-next'
 import Toggle from './Toggle.vue'
 import { api } from '../api'
+import { t } from '../i18n'
 const props = defineProps({ engine: String, mc: String, loader: String })
 const emit = defineEmits(['update:mc', 'update:loader'])
 const versions = ref([])
@@ -38,7 +39,7 @@ const filter = ref('')
 const snapshots = ref(false)
 const loading = ref(false)
 const error = ref('')
-const loaderLabel = computed(() => ({ paper: 'Build Paper', purpur: 'Build Purpur', fabric: 'Wersja Fabric Loader', quilt: 'Wersja Quilt Loader', forge: 'Wersja Forge', neoforge: 'Wersja NeoForge' })[props.engine])
+const loaderLabel = computed(() => t({ paper: 'Build Paper', purpur: 'Build Purpur', fabric: 'Wersja Fabric Loader', quilt: 'Wersja Quilt Loader', forge: 'Wersja Forge', neoforge: 'Wersja NeoForge' }[props.engine]))
 const filtered = computed(() => versions.value.filter((v) => !filter.value || v.id.includes(filter.value.trim())).slice(0, 160))
 
 async function load() {

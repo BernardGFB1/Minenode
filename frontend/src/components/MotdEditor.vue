@@ -2,36 +2,36 @@
   <div class="motd-ed" :class="{ compact }">
     <div class="toolbar">
       <div class="grp">
-        <button type="button" class="tb" title="Cofnij (Ctrl+Z)" @mousedown.prevent="cmd('undo')"><Undo2 /></button>
-        <button type="button" class="tb" title="Ponów (Ctrl+Y)" @mousedown.prevent="cmd('redo')"><Redo2 /></button>
+        <button type="button" class="tb" :title="$t('Cofnij (Ctrl+Z)')" @mousedown.prevent="cmd('undo')"><Undo2 /></button>
+        <button type="button" class="tb" :title="$t('Ponów (Ctrl+Y)')" @mousedown.prevent="cmd('redo')"><Redo2 /></button>
       </div>
       <div class="grp">
-        <button type="button" class="tb" :class="{ on: active.bold }" title="Pogrubienie §l" @mousedown.prevent="cmd('bold')"><Bold /></button>
-        <button type="button" class="tb" :class="{ on: active.italic }" title="Kursywa §o" @mousedown.prevent="cmd('italic')"><Italic /></button>
-        <button type="button" class="tb" :class="{ on: active.underline }" title="Podkreślenie §n" @mousedown.prevent="cmd('underline')"><Underline /></button>
-        <button type="button" class="tb" :class="{ on: active.strike }" title="Przekreślenie §m" @mousedown.prevent="cmd('strikeThrough')"><Strikethrough /></button>
-        <button type="button" class="tb obf" :class="{ on: active.obf }" title="Zamazany / losowe znaki §k" @mousedown.prevent="toggleObf">§k</button>
-        <button type="button" class="tb" title="Wyczyść formatowanie §r" @mousedown.prevent="cmd('removeFormat')"><RemoveFormatting /></button>
+        <button type="button" class="tb" :class="{ on: active.bold }" :title="$t('Pogrubienie §l')" @mousedown.prevent="cmd('bold')"><Bold /></button>
+        <button type="button" class="tb" :class="{ on: active.italic }" :title="$t('Kursywa §o')" @mousedown.prevent="cmd('italic')"><Italic /></button>
+        <button type="button" class="tb" :class="{ on: active.underline }" :title="$t('Podkreślenie §n')" @mousedown.prevent="cmd('underline')"><Underline /></button>
+        <button type="button" class="tb" :class="{ on: active.strike }" :title="$t('Przekreślenie §m')" @mousedown.prevent="cmd('strikeThrough')"><Strikethrough /></button>
+        <button type="button" class="tb obf" :class="{ on: active.obf }" :title="$t('Zamazany / losowe znaki §k')" @mousedown.prevent="toggleObf">§k</button>
+        <button type="button" class="tb" :title="$t('Wyczyść formatowanie §r')" @mousedown.prevent="cmd('removeFormat')"><RemoveFormatting /></button>
       </div>
       <div class="grp pop-wrap">
-        <button type="button" class="tb" title="Znaki specjalne" @mousedown.prevent="pop = pop === 'chars' ? null : 'chars'"><Omega /></button>
+        <button type="button" class="tb" :title="$t('Znaki specjalne')" @mousedown.prevent="pop = pop === 'chars' ? null : 'chars'"><Omega /></button>
         <div v-if="pop === 'chars'" class="pop chars" @mousedown.prevent>
           <button v-for="ch in SPECIAL_CHARS" :key="ch" type="button" class="ch" @mousedown.prevent="insert(ch)">{{ ch }}</button>
         </div>
       </div>
       <div class="grp pop-wrap">
-        <button type="button" class="tb color" title="Kolor tekstu" @mousedown.prevent="pop = pop === 'color' ? null : 'color'">
+        <button type="button" class="tb color" :title="$t('Kolor tekstu')" @mousedown.prevent="pop = pop === 'color' ? null : 'color'">
           <span class="a" :style="{ borderColor: lastColor }">A</span><ChevronDown class="cv" />
         </button>
         <div v-if="pop === 'color'" class="pop colors" @mousedown.prevent>
-          <button v-for="[c, hex, label] in MC_COLORS" :key="c" type="button" class="sw" :style="{ background: hex }" :title="`${label} §${c}`" @mousedown.prevent="color(hex)" />
+          <button v-for="[c, hex, label] in MC_COLORS" :key="c" type="button" class="sw" :style="{ background: hex }" :title="`${$t(label)} §${c}`" @mousedown.prevent="color(hex)" />
         </div>
       </div>
       <div v-if="placeholders.length" class="grp ph">
-        <button v-for="p in placeholders" :key="p.key" type="button" class="chip" :title="p.label" @mousedown.prevent="insert(`{${p.key}}`)">{{ '{' + p.key + '}' }}</button>
+        <button v-for="p in placeholders" :key="p.key" type="button" class="chip" :title="$t(p.label)" @mousedown.prevent="insert(`{${p.key}}`)">{{ '{' + p.key + '}' }}</button>
       </div>
       <span class="spacer" />
-      <button type="button" class="tb raw" :class="{ on: rawMode }" title="Edytuj kody § ręcznie" @mousedown.prevent="rawMode = !rawMode"><Code2 /> §</button>
+      <button type="button" class="tb raw" :class="{ on: rawMode }" :title="$t('Edytuj kody § ręcznie')" @mousedown.prevent="rawMode = !rawMode"><Code2 /> §</button>
     </div>
 
     <div v-show="!rawMode" ref="ed" class="surface" contenteditable="true" spellcheck="false" :style="surfaceStyle"
@@ -40,10 +40,10 @@
     <textarea v-if="rawMode" v-model="raw" class="surface rawarea" :rows="maxLines" spellcheck="false" :style="surfaceStyle" @input="onRaw" />
 
     <div class="foot">
-      <span>{{ lines }}/{{ maxLines }} {{ maxLines === 1 ? 'linia' : 'linie' }} max</span>
-      <span class="mono">{{ visibleLength }} znaków</span>
+      <span>{{ $t('{n}/{max} linii max', { n: lines, max: maxLines }) }}</span>
+      <span class="mono">{{ $t('{n} znaków', { n: visibleLength }) }}</span>
       <span class="spacer" />
-      <span v-if="tooLong" class="warn">Linia ma ponad 45 znaków – na liście serwerów może zostać ucięta</span>
+      <span v-if="tooLong" class="warn">{{ $t('Linia ma ponad 45 znaków – na liście serwerów może zostać ucięta') }}</span>
     </div>
   </div>
 </template>

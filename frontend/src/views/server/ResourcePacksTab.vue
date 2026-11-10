@@ -2,66 +2,65 @@
   <div v-if="d" class="col" style="gap: 16px">
     <div v-if="!d.base_url" class="callout warn">
       <AlertTriangle />
-      <div>Panel nie zna swojego publicznego adresu, więc gracze nie pobiorą paczki. Ustaw <b>Publiczny adres panelu</b>
-        (np. <span class="mono">http://mc.example.com:8080</span>) w <router-link to="/settings">Ustawieniach panelu</router-link>.</div>
+      <div>{{ $t('Paczki są wysyłane graczom przez port Minecrafta z osobnej subdomeny, ale panel nie zna jeszcze swojego adresu. Ustaw') }} <b>{{ $t('domenę bazową') }}</b> {{ $t('lub') }} <b>{{ $t('publiczny adres') }}</b> w <router-link to="/settings">{{ $t('Ustawieniach panelu') }}</router-link>.</div>
     </div>
     <div v-else-if="!d.explicit_base" class="callout info small">
-      <Info /><div>Paczki są hostowane pod <span class="mono">{{ d.base_url }}</span> (adres wyliczony z domeny). Jeśli panel stoi za reverse proxy lub innym portem, ustaw dokładny adres w Ustawieniach panelu.</div>
+      <Info /><div>{{ $t('Paczki są wysyłane przez port Minecrafta pod adresem') }} <span class="mono">{{ d.base_url }}</span> {{ $t('– nie trzeba otwierać dodatkowego portu.') }}</div>
     </div>
-    <div v-if="restartNeeded" class="callout warn small"><RotateCcw /><div class="grow">Zmiana paczki zadziała po restarcie serwera.</div><button class="btn sm" @click="restart">Restartuj teraz</button></div>
+    <div v-if="restartNeeded" class="callout warn small"><RotateCcw /><div class="grow">{{ $t('Zmiana paczki zadziała po restarcie serwera.') }}</div><button class="btn sm" @click="restart">{{ $t('Restartuj teraz') }}</button></div>
 
     <!-- active -->
     <section class="card">
-      <div class="card-head"><Sparkles class="hi" /><h3>Aktywna paczka serwera</h3>
-        <button v-if="active" class="btn sm danger" @click="deactivate"><PowerOff /> Wyłącz paczkę</button></div>
+      <div class="card-head"><Sparkles class="hi" /><h3>{{ $t('Aktywna paczka serwera') }}</h3>
+        <button v-if="active" class="btn sm danger" @click="deactivate"><PowerOff /> {{ $t('Wyłącz paczkę') }}</button></div>
       <div v-if="active" class="card-body col" style="gap: 14px">
         <div class="row" style="gap: 14px">
           <img :src="iconOf(active)" class="pic" alt="" @error="(e) => (e.target.style.visibility = 'hidden')" />
           <div class="grow" style="min-width: 0">
             <b>{{ active.name }}</b>
             <div class="small muted ellipsis">{{ active.description }}</div>
-            <button class="url mono" title="Kopiuj adres" @click="copy(active.url)"><Link2 /> <span class="ellipsis">{{ active.url }}</span> <Copy /></button>
+            <button class="url mono" :title="$t('Kopiuj adres')" @click="copy(active.url)"><Link2 /> <span class="ellipsis">{{ active.url }}</span> <Copy /></button>
           </div>
         </div>
         <div class="grid grid-2">
-          <Toggle v-model="opts.require" label="Wymagaj paczki" hint="Gracze, którzy odmówią pobrania, zostaną rozłączeni" />
+          <Toggle v-model="opts.require" :label="$t('Wymagaj paczki')" :hint="$t('Gracze, którzy odmówią pobrania, zostaną rozłączeni')" />
           <div class="field">
-            <label>Komunikat przy pobieraniu</label>
-            <input v-model="opts.prompt" class="input" maxlength="300" placeholder="np. Ten serwer używa własnych tekstur" />
+            <label>{{ $t('Komunikat przy pobieraniu') }}</label>
+            <input v-model="opts.prompt" class="input" maxlength="300" :placeholder="$t('np. Ten serwer używa własnych tekstur')" />
           </div>
         </div>
-        <div class="row"><span class="spacer" /><button class="btn primary" @click="activate(active)"><Save /> Zapisz opcje</button></div>
+        <div class="row"><span class="spacer" /><button class="btn primary" @click="activate(active)"><Save /> {{ $t('Zapisz opcje') }}</button></div>
       </div>
       <div v-else class="card-body small muted">
-        <template v-if="d.external_url">Serwer używa zewnętrznej paczki: <span class="mono">{{ d.external_url }}</span> (ustawionej ręcznie w server.properties).</template>
-        <template v-else>Brak aktywnej paczki. Wgraj własną lub pobierz z Modrinth/CurseForge, a potem kliknij „Ustaw jako paczkę serwera”.</template>
+        <template v-if="d.external_url">{{ $t('Serwer używa zewnętrznej paczki:') }} <span class="mono">{{ d.external_url }}</span> {{ $t('(ustawionej ręcznie w server.properties).') }}</template>
+        <template v-else>{{ $t('Brak aktywnej paczki. Wgraj własną lub pobierz z Modrinth/CurseForge, a potem kliknij „Ustaw jako paczkę serwera”.') }}</template>
       </div>
     </section>
 
     <!-- library -->
     <section class="card">
-      <div class="card-head"><Library class="hi" /><h3>Paczki na serwerze</h3><span class="badge">{{ d.packs.length }}</span>
-        <label class="btn sm"><Upload /> Wgraj ZIP<input type="file" accept=".zip" hidden @change="upload($event.target.files[0]); $event.target.value = ''" /></label></div>
+      <div class="card-head"><Library class="hi" /><h3>{{ $t('Paczki na serwerze') }}</h3><span class="badge">{{ d.packs.length }}</span>
+        <label class="btn sm"><Upload /> {{ $t('Wgraj ZIP') }}<input type="file" accept=".zip" hidden @change="upload($event.target.files[0]); $event.target.value = ''" /></label></div>
       <div class="drop" :class="{ over: dragOver }" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="dragOver = false; upload($event.dataTransfer.files[0])">
-        <div v-if="uploading" class="row small" style="width: 100%"><Loader2 class="spin" style="width: 16px" /> Wysyłanie… <div class="progress grow"><div :style="{ width: uploading * 100 + '%' }" /></div></div>
-        <div v-else-if="!d.packs.length" class="muted small"><Upload class="ui" /> Przeciągnij tutaj plik .zip z paczką zasobów</div>
+        <div v-if="uploading" class="row small" style="width: 100%"><Loader2 class="spin" style="width: 16px" /> {{ $t('Wysyłanie…') }} <div class="progress grow"><div :style="{ width: uploading * 100 + '%' }" /></div></div>
+        <div v-else-if="!d.packs.length" class="muted small"><Upload class="ui" /> {{ $t('Przeciągnij tutaj plik .zip z paczką zasobów') }}</div>
         <div v-else class="packs">
           <div v-for="p in d.packs" :key="p.id" class="pack" :class="{ act: p.id === d.active }">
             <img :src="iconOf(p)" class="pic" alt="" @error="(e) => (e.target.style.visibility = 'hidden')" />
             <div class="grow" style="min-width: 0">
-              <div class="row" style="gap: 6px"><b class="ellipsis">{{ p.name }}</b><span v-if="p.id === d.active" class="badge green">aktywna</span></div>
+              <div class="row" style="gap: 6px"><b class="ellipsis">{{ p.name }}</b><span v-if="p.id === d.active" class="badge green">{{ $t('aktywna') }}</span></div>
               <div class="tiny muted ellipsis">{{ p.description || '—' }}</div>
               <div class="row wrap tiny" style="gap: 6px; margin-top: 4px">
-                <span class="badge">{{ SOURCE[p.source] }}</span>
-                <span v-if="p.pack_format" class="badge" :title="'pack_format w pack.mcmeta'">format {{ p.pack_format }}</span>
+                <span class="badge">{{ $t(SOURCE[p.source]) }}</span>
+                <span v-if="p.pack_format" class="badge" :title="'pack_format w pack.mcmeta'">{{ $t('format {n}', { n: p.pack_format }) }}</span>
                 <span class="badge">{{ formatBytes(p.size) }}</span>
-                <span v-if="p.fixed" class="badge blue" title="Paczka była zapakowana w folder – panel poprawił strukturę">poprawiono strukturę</span>
+                <span v-if="p.fixed" class="badge blue" :title="$t('Paczka była zapakowana w folder – panel poprawił strukturę')">{{ $t('poprawiono strukturę') }}</span>
               </div>
             </div>
             <div class="row" style="gap: 4px">
-              <button v-if="p.id !== d.active" class="btn sm primary" :disabled="!d.base_url" @click="activate(p)"><Check /> Ustaw jako paczkę serwera</button>
-              <button class="btn sm ghost icon" title="Pobierz" @click="download(`/servers/${id}/resourcepacks/${p.id}/download`)"><Download /></button>
-              <button class="btn sm ghost icon" title="Usuń" @click="remove(p)"><Trash2 /></button>
+              <button v-if="p.id !== d.active" class="btn sm primary" :disabled="!d.base_url" @click="activate(p)"><Check /> {{ $t('Ustaw jako paczkę serwera') }}</button>
+              <button class="btn sm ghost icon" :title="$t('Pobierz')" @click="download(`/servers/${id}/resourcepacks/${p.id}/download`)"><Download /></button>
+              <button class="btn sm ghost icon" :title="$t('Usuń')" @click="remove(p)"><Trash2 /></button>
             </div>
           </div>
         </div>
@@ -70,18 +69,18 @@
 
     <!-- browse -->
     <section class="card">
-      <div class="card-head"><Search class="hi" /><h3>Pobierz z Modrinth / CurseForge</h3></div>
+      <div class="card-head"><Search class="hi" /><h3>{{ $t('Pobierz z Modrinth / CurseForge') }}</h3></div>
       <div class="card-body col" style="gap: 12px">
         <div class="row wrap" style="gap: 10px">
           <div class="seg">
             <button :class="{ active: source === 'modrinth' }" @click="source = 'modrinth'; search(true)">Modrinth</button>
             <button :class="{ active: source === 'curseforge' }" @click="source = 'curseforge'; search(true)">CurseForge</button>
           </div>
-          <div class="searchbox grow"><Search /><input v-model="q" placeholder="Szukaj paczek, np. Faithful, Fresh Animations…" @keydown.enter="search(true)" /></div>
-          <Toggle v-model="anyVersion" label="Wszystkie wersje" @update:model-value="search(true)" />
+          <div class="searchbox grow"><Search /><input v-model="q" :placeholder="$t('Szukaj paczek, np. Faithful, Fresh Animations…')" @keydown.enter="search(true)" /></div>
+          <Toggle v-model="anyVersion" :label="$t('Wszystkie wersje')" @update:model-value="search(true)" />
         </div>
-        <div v-if="source === 'curseforge' && !cfOk" class="callout warn small"><KeyRound />CurseForge wymaga klucza API – dodaj go w <router-link to="/settings">Ustawieniach</router-link>.</div>
-        <div v-else-if="error" class="callout warn small"><AlertTriangle />{{ error }}</div>
+        <div v-if="source === 'curseforge' && !cfOk" class="callout warn small"><KeyRound />{{ $t('CurseForge wymaga klucza API – dodaj go w') }} <router-link to="/settings">{{ $t('Ustawieniach') }}</router-link>.</div>
+        <div v-else-if="error" class="callout warn small"><AlertTriangle />{{ $tm(error) }}</div>
         <div v-if="searching && !results.length" class="empty"><Loader2 class="spin" /></div>
         <div class="results">
           <div v-for="r in results" :key="r.id" class="res">
@@ -92,11 +91,11 @@
               <div class="tiny muted desc">{{ r.description }}</div>
               <span class="badge" style="margin-top: 6px"><Download class="bi" /> {{ compact(r.downloads) }}</span>
             </div>
-            <button class="btn sm" :disabled="busy[r.id]" @click="install(r)"><Loader2 v-if="busy[r.id]" class="spin" /><Download v-else /> Pobierz na serwer</button>
+            <button class="btn sm" :disabled="busy[r.id]" @click="install(r)"><Loader2 v-if="busy[r.id]" class="spin" /><Download v-else /> {{ $t('Pobierz na serwer') }}</button>
           </div>
         </div>
         <div v-if="results.length && results.length < total" class="row" style="justify-content: center">
-          <button class="btn sm" :disabled="searching" @click="search(false)">Pokaż więcej</button>
+          <button class="btn sm" :disabled="searching" @click="search(false)">{{ $t('Pokaż więcej') }}</button>
         </div>
       </div>
     </section>

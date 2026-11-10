@@ -13,35 +13,35 @@
             <span>{{ ENGINE_META[s.type]?.name }} <span class="mono">{{ s.mc_version }}</span><template v-if="s.loader_version"> · <span class="mono">{{ s.loader_version }}</span></template></span>
             <span v-if="s.java_feature || s.required_java">Java {{ s.java_feature || s.required_java }}</span>
             <span v-if="s.modpack">{{ s.modpack.name }} <span class="mono">{{ s.modpack.version_name }}</span></span>
-            <button class="addr mono" title="Kopiuj adres" @click="copy"><Globe /> {{ s.address }} <Copy /></button>
+            <button class="addr mono" :title="$t('Kopiuj adres')" @click="copy"><Globe /> {{ $addr(s.address) }} <Copy /></button>
           </div>
         </div>
         <div class="actions">
-          <button v-if="canStart" class="btn primary" :disabled="pending" @click="power('start')"><Play /> Uruchom</button>
+          <button v-if="canStart" class="btn primary" :disabled="pending" @click="power('start')"><Play /> {{ $t('Uruchom') }}</button>
           <template v-else>
-            <button class="btn" :disabled="pending || !s.installed || s.state === 'stopping' || s.state === 'installing'" @click="power('restart')"><RotateCcw /> Restart</button>
-            <button class="btn" :disabled="pending || s.state === 'stopping' || s.state === 'installing'" @click="power('stop')"><Square /> Stop</button>
+            <button class="btn" :disabled="pending || !s.installed || s.state === 'stopping' || s.state === 'installing'" @click="power('restart')"><RotateCcw /> {{ $t('Restart') }}</button>
+            <button class="btn" :disabled="pending || s.state === 'stopping' || s.state === 'installing'" @click="power('stop')"><Square /> {{ $t('Stop') }}</button>
           </template>
-          <button class="btn icon danger" title="Wymuś zatrzymanie (kill)" :disabled="!['online', 'starting', 'stopping'].includes(s.state)" @click="kill"><Zap /></button>
+          <button class="btn icon danger" :title="$t('Wymuś zatrzymanie (kill)')" :disabled="!['online', 'starting', 'stopping'].includes(s.state)" @click="kill"><Zap /></button>
         </div>
       </header>
 
       <div v-if="live.job" class="job card">
         <Loader2 class="spin" />
         <div class="grow">
-          <div class="row small"><b>{{ live.job.title }}</b><span class="muted">{{ live.job.stage }}</span><span class="spacer" />
+          <div class="row small"><b>{{ $tm(live.job.title) }}</b><span class="muted">{{ $tm(live.job.stage) }}</span><span class="spacer" />
             <span v-if="live.job.progress != null" class="num muted">{{ Math.round(live.job.progress * 100) }}%</span></div>
           <div class="progress" :class="{ indeterminate: live.job.progress == null }" style="margin-top: 8px"><div :style="{ width: (live.job.progress || 0) * 100 + '%' }" /></div>
         </div>
       </div>
       <div v-else-if="s.state === 'install_failed'" class="callout warn" style="margin-bottom: 16px">
-        <AlertTriangle /><div class="grow">Instalacja nie powiodła się – szczegóły w konsoli. Możesz spróbować ponownie lub zmienić wersję w <router-link :to="`/servers/${id}/settings`">Ustawieniach</router-link>.</div>
-        <button class="btn sm" @click="retry">Ponów instalację</button>
+        <AlertTriangle /><div class="grow">{{ $t('Instalacja nie powiodła się – szczegóły w konsoli. Możesz spróbować ponownie lub zmienić wersję w') }} <router-link :to="`/servers/${id}/settings`">{{ $t('Ustawieniach') }}</router-link>.</div>
+        <button class="btn sm" @click="retry">{{ $t('Ponów instalację') }}</button>
       </div>
 
       <nav class="tabs" style="margin-bottom: 20px">
         <router-link v-for="t in tabs" :key="t.to" :to="`/servers/${id}${t.to}`" class="tab" :exact-active-class="'active'" :active-class="t.to ? 'active' : ''">
-          <component :is="t.icon" /> {{ t.label }}
+          <component :is="t.icon" /> {{ $t(t.label) }}
           <span v-if="t.badge" class="badge amber" style="height: 18px; padding: 0 6px">{{ t.badge }}</span>
         </router-link>
       </nav>

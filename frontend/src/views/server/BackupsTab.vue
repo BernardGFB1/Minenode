@@ -2,55 +2,55 @@
   <div v-if="data" class="col" style="gap: 16px">
     <div class="grid" style="grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr)">
       <section class="card">
-        <div class="card-head"><ArchiveRestore class="hi" /><h3>Nowa kopia zapasowa</h3></div>
+        <div class="card-head"><ArchiveRestore class="hi" /><h3>{{ $t('Nowa kopia zapasowa') }}</h3></div>
         <div class="card-body col" style="gap: 12px">
-          <p class="small text-2">Kopia obejmuje cały katalog serwera (świat, konfigurację, mody, pluginy). Gdy serwer działa, zapis świata jest na chwilę wstrzymywany (<span class="mono">save-off</span> / <span class="mono">save-all flush</span>), aby kopia była spójna.</p>
+          <p class="small text-2">{{ $t('Kopia obejmuje cały katalog serwera (świat, konfigurację, mody, pluginy). Gdy serwer działa, zapis świata jest na chwilę wstrzymywany (') }}<span class="mono">{{ $t('save-off') }}</span> / <span class="mono">{{ $t('save-all flush') }}</span>{{ $t('), aby kopia była spójna.') }}</p>
           <form class="row" @submit.prevent="create">
-            <input v-model="note" class="input grow" placeholder="Notatka (opcjonalnie), np. przed aktualizacją modów" maxlength="200" />
-            <button class="btn primary" :disabled="data.busy || creating"><Loader2 v-if="data.busy || creating" class="spin" /><Plus v-else /> Utwórz kopię</button>
+            <input v-model="note" class="input grow" :placeholder="$t('Notatka (opcjonalnie), np. przed aktualizacją modów')" maxlength="200" />
+            <button class="btn primary" :disabled="data.busy || creating"><Loader2 v-if="data.busy || creating" class="spin" /><Plus v-else /> {{ $t('Utwórz kopię') }}</button>
           </form>
-          <div class="tiny muted">Ostatnia kopia: {{ data.last_backup_at ? timeAgo(data.last_backup_at) : 'nigdy' }}</div>
+          <div class="tiny muted">{{ $t('Ostatnia kopia: {when}', { when: data.last_backup_at ? timeAgo(data.last_backup_at) : $t('nigdy') }) }}</div>
         </div>
       </section>
       <section class="card">
-        <div class="card-head"><CalendarClock class="hi" /><h3>Harmonogram</h3>
+        <div class="card-head"><CalendarClock class="hi" /><h3>{{ $t('Harmonogram') }}</h3>
           <Toggle v-model="sched.enabled" @update:model-value="saveSchedule" /></div>
         <div class="card-body grid grid-2" :class="{ disabled: !sched.enabled }">
           <div class="field">
-            <label>Co ile</label>
+            <label>{{ $t('Co ile') }}</label>
             <select v-model.number="sched.interval_hours" class="select" @change="saveSchedule">
-              <option v-for="h in [1, 3, 6, 12, 24, 48, 168]" :key="h" :value="h">{{ h === 168 ? 'tydzień' : h === 1 ? 'godzinę' : h + ' h' }}</option>
+              <option v-for="h in [1, 3, 6, 12, 24, 48, 168]" :key="h" :value="h">{{ h === 168 ? $t('tydzień') : h === 1 ? $t('godzinę') : h + ' h' }}</option>
             </select>
           </div>
           <div class="field">
-            <label>Zachowaj automatycznych</label>
+            <label>{{ $t('Zachowaj automatycznych') }}</label>
             <input v-model.number="sched.keep" type="number" min="1" max="500" class="input" @change="saveSchedule" />
           </div>
-          <div class="tiny muted" style="grid-column: 1 / -1">Najstarsze automatyczne kopie są usuwane. Kopie ręczne nie są nigdy kasowane automatycznie.</div>
+          <div class="tiny muted" style="grid-column: 1 / -1">{{ $t('Najstarsze automatyczne kopie są usuwane. Kopie ręczne nie są nigdy kasowane automatycznie.') }}</div>
         </div>
       </section>
     </div>
 
     <section class="card">
-      <div class="card-head"><Archive class="hi" /><h3>Kopie</h3><span class="badge">{{ data.backups.length }}</span>
-        <span class="small muted">łącznie {{ formatBytes(data.backups.reduce((a, b) => a + b.size, 0)) }}</span></div>
+      <div class="card-head"><Archive class="hi" /><h3>{{ $t('Kopie') }}</h3><span class="badge">{{ data.backups.length }}</span>
+        <span class="small muted">{{ $t('łącznie') }} {{ formatBytes(data.backups.reduce((a, b) => a + b.size, 0)) }}</span></div>
       <table class="table">
-        <thead><tr><th>Data</th><th>Opis</th><th>Wersja</th><th>Rozmiar</th><th /></tr></thead>
+        <thead><tr><th>{{ $t('Data') }}</th><th>{{ $t('Opis') }}</th><th>{{ $t('Wersja') }}</th><th>{{ $t('Rozmiar') }}</th><th /></tr></thead>
         <tbody>
           <tr v-for="b in data.backups" :key="b.id">
             <td><div style="font-weight: 550">{{ formatDate(b.created_at) }}</div><div class="tiny muted">{{ timeAgo(b.created_at) }}</div></td>
-            <td><span v-if="b.auto" class="badge blue" style="margin-right: 6px">auto</span><span class="small">{{ b.note }}</span></td>
+            <td><span v-if="b.auto" class="badge blue" style="margin-right: 6px">{{ $t('auto') }}</span><span class="small">{{ $tm(b.note) }}</span></td>
             <td class="small mono muted">{{ b.type }} {{ b.mc_version }}</td>
             <td class="num small">{{ formatBytes(b.size) }}</td>
             <td>
               <div class="row" style="gap: 4px; justify-content: flex-end">
-                <button class="btn sm" @click="download(`/servers/${id}/backups/${b.id}/download`)"><Download /> Pobierz</button>
-                <button class="btn sm" :disabled="data.busy" @click="restore(b)"><RotateCcw /> Przywróć</button>
-                <button class="btn sm ghost icon" title="Usuń" @click="remove(b)"><Trash2 /></button>
+                <button class="btn sm" @click="download(`/servers/${id}/backups/${b.id}/download`)"><Download /> {{ $t('Pobierz') }}</button>
+                <button class="btn sm" :disabled="data.busy" @click="restore(b)"><RotateCcw /> {{ $t('Przywróć') }}</button>
+                <button class="btn sm ghost icon" :title="$t('Usuń')" @click="remove(b)"><Trash2 /></button>
               </div>
             </td>
           </tr>
-          <tr v-if="!data.backups.length"><td colspan="5" class="empty small">Brak kopii zapasowych.</td></tr>
+          <tr v-if="!data.backups.length"><td colspan="5" class="empty small">{{ $t('Brak kopii zapasowych.') }}</td></tr>
         </tbody>
       </table>
     </section>

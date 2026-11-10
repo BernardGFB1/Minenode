@@ -1,3 +1,5 @@
+import { t, dateLocale } from './i18n'
+
 export function formatBytes(n, digits = 1) {
   if (n == null || isNaN(n)) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -23,20 +25,20 @@ export function formatDuration(sec) {
 export function timeAgo(ts) {
   if (!ts) return '—'
   const diff = Date.now() / 1000 - ts
-  if (diff < 60) return 'przed chwilą'
-  if (diff < 3600) return `${Math.floor(diff / 60)} min temu`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} h temu`
-  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} dni temu`
-  return new Date(ts * 1000).toLocaleDateString('pl-PL')
+  if (diff < 60) return t('przed chwilą')
+  if (diff < 3600) return t('{n} min temu', { n: Math.floor(diff / 60) })
+  if (diff < 86400) return t('{n} h temu', { n: Math.floor(diff / 3600) })
+  if (diff < 86400 * 30) return t('{n} dni temu', { n: Math.floor(diff / 86400) })
+  return new Date(ts * 1000).toLocaleDateString(dateLocale())
 }
 
 export function formatDate(ts) {
   if (!ts) return '—'
   const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
-  return d.toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'short' })
+  return d.toLocaleString(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-export const compact = (n) => new Intl.NumberFormat('pl-PL', { notation: 'compact', maximumFractionDigits: 1 }).format(n || 0)
+export const compact = (n) => new Intl.NumberFormat(dateLocale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n || 0)
 
 export const STATE = {
   online: { label: 'Online', color: 'green' },

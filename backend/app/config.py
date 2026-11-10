@@ -28,6 +28,9 @@ PANEL_PORT = _env_int("MINENODE_PORT", 8080)
 PROXY_HOST = os.environ.get("MINENODE_PROXY_HOST", "0.0.0.0")
 PROXY_PORT = _env_int("MINENODE_PROXY_PORT", 25565)
 INTERNAL_PORT_START = _env_int("MINENODE_INTERNAL_PORT_START", 25600)
+VOICE_HOST = os.environ.get("MINENODE_VOICE_HOST", PROXY_HOST)
+VOICE_PORT = _env_int("MINENODE_VOICE_PORT", 24454)  # shared public UDP port for Simple Voice Chat
+INTERNAL_VOICE_PORT_START = _env_int("MINENODE_INTERNAL_VOICE_PORT_START", 24500)
 
 # Optional bootstrap admin account (only used when no user exists yet).
 BOOTSTRAP_USER = os.environ.get("MINENODE_ADMIN_USER")
