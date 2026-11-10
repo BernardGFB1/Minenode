@@ -288,7 +288,10 @@ class ServerInstance:
                 self.set_job("Instalacja modpacka", "Wyłączanie modów tylko dla klienta", 0.98)
                 from . import clientmods
                 try:
-                    await clientmods.prune(self.dir, log)
+                    if plan.meta.get("server_pack"):
+                        log("Oficjalna paczka serwerowa – pomijam automatyczne wyłączanie modów (autor przygotował ją pod serwer).")
+                    else:
+                        await clientmods.prune(self.dir, log)
                 except Exception as exc:  # noqa: BLE001 – a failed check must not fail the install
                     log(f"Nie udało się sprawdzić modów klienckich: {exc}")
 

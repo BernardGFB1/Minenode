@@ -738,6 +738,16 @@ const strings = {
   'Wyłączono modów tylko dla klienta: {n}': 'Client-only mods disabled: {n}',
   'Nie znaleziono modów tylko dla klienta.': 'No client-only mods found.',
 
+  // official server packs
+  'Ustawieniach': 'Settings',
+  'Szukam oficjalnej paczki serwerowej…': 'Looking for an official server pack…',
+  'Autor udostępnia oficjalną paczkę serwerową ({file}) – panel zainstaluje ją zamiast paczki dla graczy.': 'The author publishes an official server pack ({file}) – the panel will install it instead of the player pack.',
+  'Modrinth nie ma osobnych paczek serwerowych. Dodaj darmowy klucz CurseForge w': 'Modrinth has no separate server packs. Add a free CurseForge key in',
+  ', a panel sam użyje oficjalnej paczki serwerowej, jeśli autor ją udostępnia. Bez klucza panel wyłączy mody klienckie automatycznie.': ' and the panel will use the official server pack when the author publishes one. Without a key, client-only mods are disabled automatically.',
+  'Brak oficjalnej paczki serwerowej dla tej wersji – panel użyje paczki z Modrinth i automatycznie wyłączy mody działające tylko u graczy.': 'No official server pack for this version – the panel will use the Modrinth pack and disable player-only mods automatically.',
+  'Ta wersja ma oficjalną paczkę serwerową – panel zainstaluje ją zamiast paczki dla graczy.': 'This version has an official server pack – the panel will install it instead of the player pack.',
+  'Ta wersja nie ma paczki serwerowej – panel pobierze mody z listy i wyłączy te działające tylko u graczy.': 'This version has no server pack – the panel will download the listed mods and disable player-only ones.',
+
   // dialogs, time
   'Potwierdź': 'Confirm',
   'Wpisz': 'Type',
@@ -978,6 +988,10 @@ const patterns = [
   ['Nie udało się sprawdzić modów klienckich: {a}', 'Could not check for client-only mods: {a}'],
   ['Wyłączanie modów tylko dla klienta', 'Disabling client-only mods'],
   ['Mod {a} działa tylko po stronie klienta i wysypał serwer – został wyłączony (możesz go włączyć z powrotem w zakładce Mody). Ponowne uruchamianie…', 'Mod {a} is client-only and crashed the server – it was disabled (you can re-enable it in the Mods tab). Restarting…'],
+  ['Znaleziono oficjalną paczkę serwerową na CurseForge: {a} – {b}. Używam jej zamiast paczki dla graczy.', 'Found an official server pack on CurseForge: {a} – {b}. Using it instead of the player pack.'],
+  ['Modrinth nie ma osobnych paczek serwerowych. Dodaj klucz API CurseForge w Ustawieniach, a panel będzie automatycznie używał oficjalnych paczek serwerowych, jeśli autor je udostępnia.', 'Modrinth has no separate server packs. Add a CurseForge API key in Settings and the panel will use official server packs automatically when authors publish them.'],
+  ['Brak oficjalnej paczki serwerowej dla tej wersji – instaluję paczkę z Modrinth i wyłączam mody klienckie.', 'No official server pack for this version – installing the Modrinth pack and disabling client-only mods.'],
+  ['Oficjalna paczka serwerowa – pomijam automatyczne wyłączanie modów (autor przygotował ją pod serwer).', 'Official server pack – skipping automatic mod disabling (the author prepared it for servers).'],
   ['Błąd sieci', 'Network error'],
   ['Błąd {a}', 'Error {a}'],
 ]

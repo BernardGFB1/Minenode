@@ -378,7 +378,7 @@ async def create_from_modpack(body: CreateModpack, _: str = Depends(auth.require
 
     async def prepare(log):
         if body.source == "modrinth":
-            plan = await modpacks.modrinth_plan_from_version(body.version_id, log)
+            plan = await modpacks.modrinth_plan_prefer_server(body.version_id, cf_key(), log)
         else:
             plan = await modpacks.curseforge_plan_from_file(key, body.project_id, body.version_id, log)
         if inst.cfg.modpack:
@@ -1094,6 +1094,13 @@ async def modpack_search(source: Literal["modrinth", "curseforge"] = "modrinth",
     if source == "modrinth":
         return await modpacks.modrinth_search(q, offset, mc=mc or None)
     return await modpacks.curseforge_search(cf_key(), q, offset, mc=mc or None)
+
+
+@router.get("/modpacks/server-pack")
+@run_errors
+async def modpack_server_pack(version_id: str, _: str = Depends(auth.require_user)):
+    """Does an official server pack exist for this Modrinth version (on CurseForge)?"""
+    return await modpacks.server_pack_for_modrinth(version_id, cf_key())
 
 
 @router.get("/modpacks/{source}/{project_id}/versions")

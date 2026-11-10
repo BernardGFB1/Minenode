@@ -97,6 +97,16 @@
             </label>
           </div>
         </div>
+        <template v-if="selected.source === 'modrinth' && versionId">
+          <div v-if="sp.loading" class="callout small"><Loader2 class="spin" /><div>{{ $t('Szukam oficjalnej paczki serwerowej…') }}</div></div>
+          <div v-else-if="sp.data?.available" class="callout green small"><ServerCog /><div>{{ $t('Autor udostępnia oficjalną paczkę serwerową ({file}) – panel zainstaluje ją zamiast paczki dla graczy.', { file: sp.data.match.file }) }}</div></div>
+          <div v-else-if="sp.data?.needs_key" class="callout info small"><KeyRound /><div>{{ $t('Modrinth nie ma osobnych paczek serwerowych. Dodaj darmowy klucz CurseForge w') }} <router-link to="/settings">{{ $t('Ustawieniach') }}</router-link>{{ $t(', a panel sam użyje oficjalnej paczki serwerowej, jeśli autor ją udostępnia. Bez klucza panel wyłączy mody klienckie automatycznie.') }}</div></div>
+          <div v-else-if="sp.data" class="callout small"><Info /><div>{{ $t('Brak oficjalnej paczki serwerowej dla tej wersji – panel użyje paczki z Modrinth i automatycznie wyłączy mody działające tylko u graczy.') }}</div></div>
+        </template>
+        <div v-else-if="selected.source === 'curseforge' && versionId" class="callout small" :class="versions.find((v) => v.id === versionId)?.server_pack ? 'green' : ''">
+          <ServerCog v-if="versions.find((v) => v.id === versionId)?.server_pack" /><Info v-else />
+          <div>{{ versions.find((v) => v.id === versionId)?.server_pack ? $t('Ta wersja ma oficjalną paczkę serwerową – panel zainstaluje ją zamiast paczki dla graczy.') : $t('Ta wersja nie ma paczki serwerowej – panel pobierze mody z listy i wyłączy te działające tylko u graczy.') }}</div>
+        </div>
         <InstallForm v-model="installForm" :settings="settings" :sys="sys" />
       </div>
       <template #footer>
@@ -109,9 +119,9 @@
   </div>
 </template>
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Search, Upload, Package, Download, Loader2, Rocket, AlertTriangle, KeyRound, FileArchive } from 'lucide-vue-next'
+import { Search, Upload, Package, Download, Loader2, Rocket, AlertTriangle, KeyRound, FileArchive, ServerCog, Info } from 'lucide-vue-next'
 import Modal from '../components/Modal.vue'
 import InstallForm from '../components/InstallForm.vue'
 import { api, uploadWithProgress } from '../api'
@@ -134,6 +144,18 @@ const selected = ref(null)
 const versions = ref([])
 const versionsLoading = ref(false)
 const versionId = ref(null)
+const sp = reactive({ loading: false, data: null })
+let spReq = 0
+watch(versionId, async (vid) => {
+  sp.data = null
+  if (!vid || selected.value?.source !== 'modrinth') return
+  const req = ++spReq
+  sp.loading = true
+  try {
+    const r = await api.get(`/modpacks/server-pack?version_id=${encodeURIComponent(vid)}`)
+    if (req === spReq) sp.data = r
+  } catch { if (req === spReq) sp.data = { available: false } } finally { if (req === spReq) sp.loading = false }
+})
 const busy = ref(false)
 const file = ref(null)
 const dragOver = ref(false)

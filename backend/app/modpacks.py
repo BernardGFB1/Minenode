@@ -296,14 +296,94 @@ def curseforge_zip_plan(archive: Path, api_key: str, log: Log, server_pack: dict
                 await _apply_cf_server_pack(server_pack, server_dir, log, progress)
             else:
                 await _apply_cf_manifest(manifest, api_key, server_dir, log, progress)
-            _extract_overrides(zf, server_dir, [manifest.get("overrides") or "overrides"], log)
+                _extract_overrides(zf, server_dir, [manifest.get("overrides") or "overrides"], log)
             log("Modpack zainstalowany.")
         finally:
             zf.close()
             archive.unlink(missing_ok=True)
 
     return ModpackPlan(name=manifest.get("name", archive.stem), engine=engine, mc_version=mc,
-                       loader_version=loader, apply=apply, meta={"version_name": manifest.get("version", "")})
+                       loader_version=loader, apply=apply,
+                       meta={"version_name": manifest.get("version", ""), "server_pack": bool(server_pack)})
+
+
+# ===================================================================== official server packs for Modrinth imports
+# Modrinth has no separate server packs – the .mrpack is shared with players and relies on the author marking
+# client-only files. Many popular packs also publish an official, curated server pack on CurseForge, so we look
+# for the same pack *and the same version* there and prefer it.
+
+def _norm(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", s.lower())
+
+
+def _version_matches(version: str, label: str, mc: str) -> bool:
+    label = label.lower()
+    tokens = [t for t in re.findall(r"\d+(?:\.\d+)*", version) if t != mc]
+    if not tokens:
+        return False
+    tok = max(tokens, key=len)
+    return re.search(rf"(?<![0-9.]){re.escape(tok)}(?![0-9]|\.[0-9])", label) is not None
+
+
+async def find_curseforge_server_pack(api_key: str, title: str, mc: str, version: str, engine: str) -> dict | None:
+    import difflib
+    data = await _cf_get("/mods/search", api_key, {"gameId": CF_GAME_MINECRAFT, "classId": CF_CLASS_MODPACK,
+                                                    "searchFilter": title, "gameVersion": mc, "pageSize": 10,
+                                                    "sortField": 2, "sortOrder": "desc"})
+    want = _norm(title)
+    candidates = []
+    for m in data.get("data", []):
+        have = _norm(m["name"])
+        ratio = difflib.SequenceMatcher(None, have, want).ratio()
+        if ratio >= 0.72 or (len(want) > 4 and (want in have or have in want)):
+            candidates.append((ratio, m))
+    for _, m in sorted(candidates, key=lambda x: x[0], reverse=True)[:3]:
+        files = (await _cf_get(f"/mods/{m['id']}/files", api_key, {"gameVersion": mc, "pageSize": 50})).get("data", [])
+        for f in sorted(files, key=lambda x: x.get("fileDate", ""), reverse=True):
+            if f.get("isServerPack") or not f.get("serverPackFileId"):
+                continue
+            gv = {g.lower() for g in f.get("gameVersions", [])}
+            if engine != "vanilla" and gv & {"forge", "fabric", "neoforge", "quilt"} and engine not in gv:
+                continue
+            if _version_matches(version, f"{f.get('displayName', '')} {f.get('fileName', '')}", mc):
+                return {"mod_id": str(m["id"]), "file_id": str(f["id"]), "name": m["name"],
+                        "file": f.get("displayName") or f["fileName"]}
+    return None
+
+
+async def modrinth_version_info(version_id: str) -> dict:
+    v = await net.get_json(f"{MODRINTH}/version/{version_id}")
+    project = await net.get_json(f"{MODRINTH}/project/{v['project_id']}")
+    loaders = [l for l in v.get("loaders", []) if l in ("fabric", "forge", "neoforge", "quilt")]
+    return {"title": project.get("title", ""), "version": v.get("version_number", ""),
+            "mc": (v.get("game_versions") or [""])[-1], "engine": loaders[0] if loaders else "vanilla"}
+
+
+async def server_pack_for_modrinth(version_id: str, api_key: str) -> dict:
+    """{available, needs_key, match?} – used both by the UI hint and the installer."""
+    if not api_key:
+        return {"available": False, "needs_key": True}
+    info = await modrinth_version_info(version_id)
+    try:
+        match = await find_curseforge_server_pack(api_key, info["title"], info["mc"], info["version"], info["engine"])
+    except (ModpackError, httpx.HTTPError) as exc:
+        return {"available": False, "needs_key": False, "error": str(exc)}
+    return {"available": bool(match), "needs_key": False, "match": match, **info}
+
+
+async def modrinth_plan_prefer_server(version_id: str, api_key: str, log: Log) -> "ModpackPlan":
+    sp = await server_pack_for_modrinth(version_id, api_key)
+    if sp.get("available"):
+        m = sp["match"]
+        log(f"Znaleziono oficjalną paczkę serwerową na CurseForge: {m['name']} – {m['file']}. Używam jej zamiast paczki dla graczy.")
+        plan = await curseforge_plan_from_file(api_key, m["mod_id"], m["file_id"], log)
+        return plan
+    if sp.get("needs_key"):
+        log("Modrinth nie ma osobnych paczek serwerowych. Dodaj klucz API CurseForge w Ustawieniach, "
+            "a panel będzie automatycznie używał oficjalnych paczek serwerowych, jeśli autor je udostępnia.")
+    else:
+        log("Brak oficjalnej paczki serwerowej dla tej wersji – instaluję paczkę z Modrinth i wyłączam mody klienckie.")
+    return await modrinth_plan_from_version(version_id, log)
 
 
 async def _apply_cf_server_pack(sp: dict, server_dir: Path, log: Log, progress: Progress) -> None:
