@@ -1,0 +1,13 @@
+# Normalise line endings; files used inside the Linux container must stay LF even on Windows checkouts.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+requirements.txt text eol=lf
+
+*.png binary
+*.webp binary
+*.jpg binary
+*.zip binary

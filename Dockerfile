@@ -33,7 +33,8 @@ RUN pip install -r requirements.txt
 COPY backend/app ./app
 COPY --from=web /web/dist ./static
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && mkdir -p /data && chown minenode:minenode /data
+# strip Windows line endings (a CRLF checkout breaks the shebang: "exec /entrypoint.sh failed")
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh && mkdir -p /data && chown minenode:minenode /data
 
 VOLUME ["/data"]
 EXPOSE 8080 25565
