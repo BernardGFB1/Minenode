@@ -30,13 +30,12 @@ set MAX_RETRIES=30
 :WAIT_LOOP
 timeout /t 3 /nobreak >nul
 set /a RETRIES+=1
+echo Oczekiwanie na uruchomienie Dockera... [%RETRIES%/%MAX_RETRIES%]
 docker info >nul 2>&1
 if %errorlevel% equ 0 (
-    echo.
     echo ==> Docker Engine jest gotowy!
     goto :BUILD
 )
-<nul set /p =.
 if %RETRIES% lss %MAX_RETRIES% goto :WAIT_LOOP
 
 echo.
