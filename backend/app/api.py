@@ -23,7 +23,7 @@ from starlette.websockets import WebSocketDisconnect
 from . import storage as storage_mod
 from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
-from .config import DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
+from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
 from .models import BackupSchedule, JavaConfig, ModpackInfo, PanelSettings, ServerConfig, SERVER_TYPES
 from .properties import MANAGED_KEYS, read_properties, update_properties
@@ -196,6 +196,7 @@ async def system(_: str = Depends(auth.require_user)):
         "players_online": sum(len(i.online) for i in insts),
         "proxy": manager.proxy.stats() if manager.proxy else None,
         "voice": manager.voice.stats() if manager.voice else None,
+        "bedrock": manager.bedrock.stats() if manager.bedrock else None,
     }
 
 
@@ -211,6 +212,7 @@ async def get_settings(_: str = Depends(auth.require_user)):
     d["resource_pack_base"] = rpacks.public_base(manager)
     from .config import VOICE_PORT
     d["voice_port"] = VOICE_PORT
+    d["bedrock_port"] = BEDROCK_PORT
     return d
 
 
@@ -260,6 +262,8 @@ async def put_settings(body: SettingsBody, _: str = Depends(auth.require_user)):
             setattr(s, key, val.strip() if key == "public_panel_url" else val)
     manager.save_settings(s)
     rpacks.resync_urls(manager)
+    if manager.bedrock:
+        manager.bedrock.request_apply()
     return await get_settings("")
 
 
@@ -451,6 +455,8 @@ async def patch_config(sid: str, body: ConfigPatch, _: str = Depends(auth.requir
     manager.check_unique(new.subdomain, new.aliases, exclude=sid)
     inst.cfg = new
     manager.save_server(new)
+    if manager.bedrock:
+        manager.bedrock.request_apply()
     inst.broadcast({"type": "state", "state": inst.state, "summary": inst.summary()})
     return {**inst.summary(), "config": new.model_dump()}
 
@@ -565,6 +571,8 @@ async def put_properties(sid: str, body: PropsBody, _: str = Depends(auth.requir
                 changes[k] = None
     update_properties(path, changes)
     inst._enforce_properties()
+    if manager.bedrock:
+        manager.bedrock.request_apply()
     return {"properties": read_properties(path), "restart_required": inst.running}
 
 
@@ -1464,3 +1472,52 @@ async def voice_install(sid: str, _: str = Depends(auth.require_user)):
     from .config import VOICE_PORT
     voice.write_config(inst, VOICE_PORT)
     return {**_voice_state(inst), "installed_files": ins.installed, "restart_required": inst.running}
+
+
+# ====================================================================== Bedrock Edition (Geyser)
+
+def _bedrock_state(inst: ServerInstance) -> dict:
+    bp = manager.bedrock
+    hosts = bp.hosts_for(inst) if bp else []
+    host = hosts[0] if hosts else None
+    display = f"[{host}]" if host and ":" in host else host
+    address = None
+    if display:
+        address = display if BEDROCK_PORT == 19132 else f"{display}:{BEDROCK_PORT}"
+    stats = bp.stats() if bp else {}
+    return {
+        "enabled": inst.cfg.bedrock_enabled,
+        "supported": True,
+        "public_host": host,
+        "public_port": BEDROCK_PORT,
+        "address": address,
+        "hostnames": hosts,
+        "gateway_running": bool(bp and bp.running),
+        "gateway_listening": bool(bp and bp.listening),
+        "gateway_error": bp.error if bp else None,
+        "gateway_log": stats.get("log", []),
+        "gateway_version": stats.get("version"),
+        "conflicts": stats.get("conflicts", []),
+        "running": inst.running,
+    }
+
+
+@router.get("/servers/{sid}/bedrock")
+async def bedrock_get(sid: str, _: str = Depends(auth.require_user)):
+    return _bedrock_state(inst_or_404(sid))
+
+
+class BedrockBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/servers/{sid}/bedrock")
+@run_errors
+async def bedrock_set(sid: str, body: BedrockBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    inst.cfg.bedrock_enabled = body.enabled
+    manager.save_server(inst.cfg)
+    if manager.bedrock:
+        manager.bedrock.request_apply()
+    inst.broadcast({"type": "state", "state": inst.state, "summary": inst.summary()})
+    return _bedrock_state(inst)

@@ -20,6 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MINENODE_PORT=8080 \
     MINENODE_PROXY_PORT=25565 \
     MINENODE_VOICE_PORT=24454 \
+    MINENODE_BEDROCK_PORT=19132 \
     TZ=Europe/Warsaw
 
 # tini: proper PID 1 / signal forwarding; fontconfig+freetype: needed by some mods (maps, image rendering)
@@ -32,13 +33,14 @@ WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY backend/app ./app
+COPY backend/bedrock_ext/MineNodeRouter.jar ./bedrock_ext/MineNodeRouter.jar
 COPY --from=web /web/dist ./static
 COPY docker/entrypoint.sh /entrypoint.sh
 # strip Windows line endings (a CRLF checkout breaks the shebang: "exec /entrypoint.sh failed")
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh && mkdir -p /data && chown minenode:minenode /data
 
 VOLUME ["/data"]
-EXPOSE 8080 25565 24454/udp
+EXPOSE 8080 25565 24454/udp 19132/tcp 19132/udp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MINENODE_PORT\",\"8080\")}/api/health',timeout=4)" || exit 1

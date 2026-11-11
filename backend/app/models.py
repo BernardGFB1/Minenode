@@ -81,6 +81,7 @@ class ServerConfig(BaseModel):
     idle_shutdown_minutes: int = Field(default=0, ge=0, le=24 * 60)  # 0 = disabled
     voice_enabled: bool = False  # Simple Voice Chat routed through the shared UDP proxy
     voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
+    bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None

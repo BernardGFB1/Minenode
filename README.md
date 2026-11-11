@@ -2,7 +2,7 @@
 
 ![MineNode dashboard – servers, host resources and proxy](docs/screenshots/dashboard.webp)
 
-A self-hosted panel for running Minecraft Java servers. It ships as a single Docker container and gives you:
+A self-hosted panel for running Minecraft servers. It ships as a single Docker container and gives you:
 
 - **7 engines**: Vanilla, Paper, Purpur, Fabric, Quilt, Forge and NeoForge. Versions and builds come live from the official APIs.
 - **Automatic Java**: MineNode reads the required Java version from Mojang's metadata and downloads Eclipse Temurin (8/11/17/21/25) through the Adoptium API.
@@ -12,6 +12,7 @@ A self-hosted panel for running Minecraft Java servers. It ships as a single Doc
 - **Compatibility checks**: every file in `mods/` or `plugins/` is identified on Modrinth by SHA-1 and checked against the game version and loader. MineNode suggests updates (including "Update all") and prints warnings about incompatible files in the console on every start.
 - **Resource pack hosting on the Minecraft port**: upload a ZIP or get a pack from Modrinth/CurseForge. MineNode validates `pack.mcmeta` (and fixes packs wrapped in a folder), serves the pack over port `25565` from its own subdomain (`packs.mc.example.com`), and writes the URL and SHA-1 into `server.properties` with one click. No extra port is needed.
 - **Simple Voice Chat for every server through one UDP port**: install SVC with one click. A shared UDP proxy (`24454`) routes each player to the right server by the player UUID that SVC puts in every packet.
+- **Bedrock Edition through one shared Geyser port**: enable Bedrock per server and share a single Bedrock port (`19132/tcp` + `19132/udp`). A bundled Geyser extension routes players by the address they entered to the same server as Java Edition. The Java proxy is not modified.
 - **Live console** (WebSocket) with ANSI colours, command history, filtering and WARN/ERROR highlighting.
 - **Monitoring**: process CPU and RAM (15-minute charts), online players, host resources and the container memory limit.
 - **Lifecycle control**: start, graceful stop, restart and kill. Also autostart, crash auto-restart with backoff, start on join, a daily restart, and **auto-stop when nobody is online**.
@@ -38,6 +39,7 @@ Open `http://<host>:8080`. On first visit a setup wizard asks you to create the 
 | `8080/tcp` | Web panel, API and WebSocket |
 | `25565/tcp` | Minecraft: one shared port for every server (proxy), also serves resource packs |
 | `24454/udp` | Simple Voice Chat: one shared port for every server |
+| `19132/tcp` + `19132/udp` | Bedrock Edition: one shared Geyser port (optional, listens only when Bedrock is enabled) |
 
 All data (servers, worlds, Java runtimes, backups, panel config) lives in the `/data` volume.
 
@@ -57,6 +59,8 @@ services:
       - "8080:8080"
       - "25565:25565"
       - "24454:24454/udp"
+      - "19132:19132/tcp"
+      - "19132:19132/udp"
     volumes:
       - ./data:/data
     environment:
@@ -70,7 +74,7 @@ services:
 2. Add a wildcard DNS record: `*.mc.example.com  A  <server IP>` (optionally also `mc.example.com`).
 3. Each server gets its own subdomain (e.g. `survival`), so players join `survival.mc.example.com`.
 
-Connections by IP or to an unknown name go to the *default server* (set in the panel). You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings.
+Connections by IP or to an unknown name go to the *default server* (set in the panel). You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings. Bedrock players use the same hostnames on port `19132` (see [Bedrock Edition](#bedrock-edition-geyser)); unknown Bedrock addresses are rejected.
 
 ### Resource packs
 
@@ -86,6 +90,20 @@ Open **Server → Settings → Voice chat** and click *Install & enable*. MineNo
 
 The proxy reads the player UUID at the start of every SVC packet and forwards it to the server that player is on. Open UDP `24454` on your firewall.
 
+### Bedrock Edition (Geyser)
+
+MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser Standalone, using one shared Bedrock port (`19132` by default). The Java proxy stays untouched: Geyser connects to it as a normal Java client and forwards the address the player entered, so hostname routing, whitelist, *start on join* and voice chat keep working exactly as for Java players.
+
+1. Open **Server → Settings → Bedrock Edition (Geyser)** and enable *Share via Bedrock* for the servers you want. Geyser is enabled independently of the Java proxy and does not affect it.
+2. Open **TCP and UDP** port `19132` on your firewall and router. NetherNet uses TCP signalling and UDP gameplay on the same port.
+3. Players add a server in Bedrock with the same address Java players use, e.g. `survival.mc.example.com`, port `19132`. The address must resolve on the player's device; Bedrock has no SRV records.
+
+Port `19132` is shared by every server, so there is no per-server Bedrock port to open. Disabled servers keep their hostnames reserved: connecting to a Bedrock-disabled server's address is rejected instead of landing on another server. Enabling the first server downloads Geyser and Java 21 automatically; the gateway starts when the first server enables Bedrock and stops when none do.
+
+**Authentication:** Geyser has one global auth mode. If **any** enabled Bedrock server runs in online mode, MineNode sets `auth-type: online`, and every Bedrock player must have a Java Edition account linked to their Xbox account. When all enabled Bedrock servers are offline-mode, MineNode switches to `offline`, so Bedrock players do not need Java Edition. The mode is re-evaluated automatically, and only Geyser restarts when it changes — the Java proxy and servers never restart. Letting Bedrock players join an online-mode server without Java Edition requires Floodgate, which MineNode does not install yet.
+
+For `auth-type: online`, Geyser asks Microsoft only once per saved Bedrock username. Set `MINENODE_BEDROCK_SAVED_LOGINS` to the Bedrock gamertag(s), separated by commas, for example `PlayerOne,PlayerTwo`, then recreate the container. Geyser stores refresh tokens in `/data/bedrock/saved-refresh-tokens.json`; it stores tokens, not passwords. Do not expose that file or include it in public backups.
+
 ### HTTPS for the panel
 
 Put the panel behind an HTTP reverse proxy (Caddy, Traefik, nginx) with TLS and set `MINENODE_SECURE_COOKIES=true`. For example, with Caddy:
@@ -96,7 +114,7 @@ panel.example.com {
 }
 ```
 
-WebSockets work out of the box. Expose the Minecraft (`25565/tcp`) and voice (`24454/udp`) ports directly.
+WebSockets work out of the box. Expose the Minecraft (`25565/tcp`), voice (`24454/udp`) and Bedrock (`19132/tcp` + `19132/udp`) ports directly.
 
 ### Backup destinations
 
@@ -125,6 +143,8 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `MINENODE_PORT` | `8080` | Panel port |
 | `MINENODE_PROXY_PORT` | `25565` | Public Minecraft port (proxy) |
 | `MINENODE_VOICE_PORT` | `24454` | Public Simple Voice Chat UDP port |
+| `MINENODE_BEDROCK_PORT` | `19132` | Public Bedrock port (Geyser, TCP + UDP) |
+| `MINENODE_BEDROCK_SAVED_LOGINS` | – | Comma-separated Bedrock usernames whose Microsoft login token Geyser should save and refresh |
 | `MINENODE_INTERNAL_PORT_START` | `25600` | First internal game port (assigned automatically) |
 | `MINENODE_INTERNAL_VOICE_PORT_START` | `24500` | First internal voice port (assigned automatically) |
 | `MINENODE_DATA` | `/data` | Data directory |
@@ -148,6 +168,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
  Minecraft ─────▶│ :25565 MinecraftProxy ┘  handshake → hostname → internal port               │
                  │          └─ HTTP GET /rp/… → resource pack files                           │
  voice (UDP) ───▶│ :24454 VoiceProxy ── player UUID → server's internal SVC port (:24500…)    │
+ Bedrock ───────▶│ :19132 Geyser + MineNodeRouter ── hostname ──▶ :25565 proxy                │
                  │   Java (Temurin, auto)   Providers (Mojang/Paper/Purpur/Fabric/…)          │
                  │   Backups (zip)          Modpacks & content (Modrinth / CurseForge)        │
                  └──────────────────────────────────── /data ─────────────────────────────────┘
@@ -162,6 +183,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `manager.py` | Server processes, console, metrics (psutil), log parsing (players, whitelist rejections), scheduler, idle shutdown |
 | `proxy.py` | Minecraft-aware TCP proxy: parses Handshake/Login Start, routes by host, answers for offline servers, optional PROXY protocol v2, serves resource packs over HTTP on the same port |
 | `voice.py` | UDP proxy for Simple Voice Chat (routing by player UUID) and SVC config management |
+| `bedrock.py` | Shared Geyser Bedrock gateway: downloads Geyser, generates `config.yml` and hostname routes, manages the process and global auth mode. `backend/bedrock_ext/` is the bundled MineNodeRouter extension that resolves each Bedrock hostname (compiled JAR is committed) |
 | `providers.py` | Version discovery and engine installation (incl. Forge/NeoForge/Quilt installers) |
 | `java.py` | Java selection and download from Adoptium |
 | `modpacks.py` | Modrinth `.mrpack`, CurseForge manifests and server packs, file import |
@@ -186,6 +208,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
 ├── backups/<id>/*.zip     # backups + .json metadata
 ├── java/temurin-<N>/      # downloaded Java runtimes
 ├── panel/                 # servers.json, settings.json, users.json, secret.key, players/
+├── bedrock/               # Geyser jar, config.yml, logs, extensions/MineNodeRouter
 └── tmp/                   # temporary install files
 ```
 
@@ -196,7 +219,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
 ```bash
 # backend
 cd backend && python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
-MINENODE_DATA=./data MINENODE_PROXY_PORT=25599 MINENODE_VOICE_PORT=24499 uvicorn app.main:app --reload --port 8080
+MINENODE_DATA=./data MINENODE_PROXY_PORT=25599 MINENODE_VOICE_PORT=24499 MINENODE_BEDROCK_PORT=19199 uvicorn app.main:app --reload --port 8080
 
 # frontend (proxies /api to :8080, hot reload)
 cd frontend && npm install && npm run dev
@@ -217,6 +240,6 @@ API docs (OpenAPI): `http://localhost:8080/api/docs`.
 
 ## Limitations
 
-- Java Edition only. Bedrock uses UDP and has no hostname in its protocol.
+- Bedrock Edition is supported through Geyser on one shared port (`19132/tcp` + `19132/udp`), enabled per server. Geyser's global auth mode means that when any enabled server is online-mode, Bedrock players need a linked Java Edition account; Floodgate is not included.
 - The pre-1.7 legacy server list ping is not routed.
 - Behind the proxy, servers see players as `127.0.0.1`. To pass real IPs, enable *PROXY protocol* in the server settings and on the server side (e.g. Paper: `proxies.proxy-protocol: true`).

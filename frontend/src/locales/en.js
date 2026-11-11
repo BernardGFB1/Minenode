@@ -672,6 +672,23 @@ const strings = {
   'na routerze/zaporze. Konfiguracja:': 'on your router/firewall. Config:',
   'Zainstalowano Simple Voice Chat': 'Simple Voice Chat installed',
 
+  // bedrock edition (Geyser)
+  'Bedrock Edition (Geyser)': 'Bedrock Edition (Geyser)',
+  'Udostępnij przez Bedrock': 'Expose through Bedrock',
+  'Gracze z Minecraft Bedrock Edition wejdą na ten serwer przez wspólny port Geysera. Proxy Java działa bez zmian.': 'Minecraft Bedrock Edition players will reach this server through the shared Geyser port. The Java proxy stays unchanged.',
+  'Port': 'Port',
+  'Bramka Bedrock': 'Bedrock gateway',
+  'Uruchamianie…': 'Starting…',
+  'Dostępne adresy': 'Available addresses',
+  'Ustaw domenę bazową, publiczny adres lub alias hosta – bez tego gracze nie mają się z czym połączyć.': 'Set a base domain, public address or host alias – otherwise players have no address to connect to.',
+  'Bramka Bedrock nie działa:': 'The Bedrock gateway is not running:',
+  'Panel ponowi próbę automatycznie. Sprawdź, czy port nie jest zajęty przez inny program.': 'The panel will retry automatically. Check that the port is not used by another program.',
+  'Uruchamianie Geysera… Pierwsze uruchomienie pobiera Geyser i Javę, może to potrwać kilka minut.': 'Starting Geyser… The first launch downloads Geyser and Java; this can take a few minutes.',
+  'Gracze łączą się z tym samym adresem co w Java Edition, wybierając wersję Bedrock. Otwórz port {port} TCP i UDP na routerze/zaporze.': 'Players join with the same address as in Java Edition, choosing the Bedrock version. Open port {port} TCP and UDP on your router/firewall.',
+  'Bedrock jest niezależny od proxy Java: możesz go włączyć tylko dla wybranych serwerów. Bramka startuje automatycznie, gdy pierwszy serwer ma włączony Bedrock, i zatrzymuje się, gdy żaden go nie używa.': 'Bedrock is independent of the Java proxy: you can enable it for selected servers only. The gateway starts automatically when the first server enables Bedrock and stops when none uses it.',
+  'Włączono Bedrock': 'Bedrock enabled',
+  'Wyłączono Bedrock': 'Bedrock disabled',
+
   // backup destinations
   'Miejsca kopii zapasowych': 'Backup destinations',
   'Dodaj miejsce': 'Add destination',

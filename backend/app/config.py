@@ -31,6 +31,11 @@ INTERNAL_PORT_START = _env_int("MINENODE_INTERNAL_PORT_START", 25600)
 VOICE_HOST = os.environ.get("MINENODE_VOICE_HOST", PROXY_HOST)
 VOICE_PORT = _env_int("MINENODE_VOICE_PORT", 24454)  # shared public UDP port for Simple Voice Chat
 INTERNAL_VOICE_PORT_START = _env_int("MINENODE_INTERNAL_VOICE_PORT_START", 24500)
+BEDROCK_HOST = os.environ.get("MINENODE_BEDROCK_HOST", PROXY_HOST)
+BEDROCK_PORT = _env_int("MINENODE_BEDROCK_PORT", 19132)  # shared public port (TCP signaling + UDP gameplay) for Geyser
+BEDROCK_SAVED_LOGINS = tuple(
+    name.strip() for name in os.environ.get("MINENODE_BEDROCK_SAVED_LOGINS", "").split(",") if name.strip()
+)
 
 # Optional bootstrap admin account (only used when no user exists yet).
 BOOTSTRAP_USER = os.environ.get("MINENODE_ADMIN_USER")

@@ -234,6 +234,7 @@ class ServerInstance:
             "internal_port": self.cfg.internal_port,
             "modpack": self.cfg.modpack.model_dump() if self.cfg.modpack else None,
             "has_icon": (self.dir / "server-icon.png").exists(),
+            "bedrock_enabled": self.cfg.bedrock_enabled,
             "exit_code": self.exit_code,
             "created_at": self.cfg.created_at,
         }
@@ -650,6 +651,7 @@ class Manager:
         self.backups = None  # set in main
         self.proxy = None
         self.voice = None
+        self.bedrock = None
         for sid, raw in self.servers_store.data.items():
             try:
                 cfg = ServerConfig.model_validate(raw)
@@ -725,6 +727,8 @@ class Manager:
         self.instances.pop(sid, None)
         self.servers_store.data.pop(sid, None)
         self.servers_store.save()
+        if self.bedrock:
+            self.bedrock.request_apply()
         await asyncio.to_thread(shutil.rmtree, inst.dir, True)
         (PANEL_DIR / "players" / f"{sid}.json").unlink(missing_ok=True)
         if delete_backups and self.backups:

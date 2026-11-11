@@ -1,0 +1,7 @@
+id: minenode-router
+name: MineNodeRouter
+version: 1.0.0
+main: pl.minenode.router.MineNodeRouter
+api: 2.9.2
+authors:
+  - MineNode
