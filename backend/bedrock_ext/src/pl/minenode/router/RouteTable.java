@@ -19,6 +19,7 @@ import java.util.Set;
  * unit test without a running Geyser instance.</p>
  */
 public final class RouteTable {
+    private static final long CACHE_INTERVAL_MS = 1_000L;
     public static final String DEFAULT_DENIED_MESSAGE =
             "Ten adres nie jest dostępny przez Bedrock Edition.";
 
@@ -205,6 +206,14 @@ public final class RouteTable {
 
     public Collection<Route> routes() {
         return routes.values();
+    }
+
+    static boolean routeCacheFresh(long now, long checkedAt) {
+        return checkedAt != Long.MIN_VALUE && now >= checkedAt && now - checkedAt < CACHE_INTERVAL_MS;
+    }
+
+    public Collection<String> hosts() {
+        return routes.keySet();
     }
 
     public int size() {

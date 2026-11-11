@@ -19,6 +19,7 @@ public final class RouteTableTest {
         respectsFirstDuplicate();
         handlesDeniedMessage();
         handlesDenyAndFallback();
+        catchesInitialRouteCacheOverflow();
         System.out.println("RouteTableTest: " + checks + " checks passed");
     }
 
@@ -93,6 +94,11 @@ public final class RouteTableTest {
         check(blank.deniedMessage().equals(RouteTable.DEFAULT_DENIED_MESSAGE), "blank denied message falls back");
 
         check(RouteTable.parse(List.of()).size() == 0, "empty input");
+    }
+
+    private static void catchesInitialRouteCacheOverflow() {
+        check(!RouteTable.routeCacheFresh(1_000_000L, Long.MIN_VALUE),
+                "initial Long.MIN_VALUE timestamp must not make empty route table look fresh");
     }
 
     private static void handlesDenyAndFallback() {

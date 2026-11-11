@@ -1504,6 +1504,7 @@ def _bedrock_state(inst: ServerInstance) -> dict:
         "gateway_error": bp.error if bp else None,
         "gateway_log": stats.get("log", []),
         "gateway_version": stats.get("version"),
+        "router_version": stats.get("router_version"),
         "conflicts": stats.get("conflicts", []),
         "advertise": stats.get("advertise", []),
         "advertise_source": stats.get("advertise_source"),

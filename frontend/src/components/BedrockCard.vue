@@ -64,7 +64,8 @@
 
         <div class="tiny muted">
           {{ $t('Gracze łączą się z tym samym adresem co w Java Edition, wybierając wersję Bedrock. Otwórz port {port} TCP i UDP na routerze/zaporze.', { port: v.public_port }) }}
-          <span v-if="v.gateway_version"> Geyser {{ v.gateway_version }}.</span>
+           <span v-if="v.gateway_version"> Geyser {{ v.gateway_version }}.</span>
+           <span v-if="v.router_version"> MineNodeRouter {{ v.router_version }}.</span>
         </div>
       </template>
 

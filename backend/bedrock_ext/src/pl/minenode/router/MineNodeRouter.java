@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -22,6 +24,7 @@ import java.util.List;
  * or disabling Bedrock for a server does not require restarting Geyser.</p>
  */
 public final class MineNodeRouter implements Extension {
+    public static final String VERSION = "1.0.6";
     private static final String ROUTES_FILE = "routes.properties";
     private static final long CHECK_INTERVAL_MS = 1_000L;
 
@@ -41,6 +44,7 @@ public final class MineNodeRouter implements Extension {
 
     @Subscribe
     public void onSessionLogin(SessionLoginEvent event) {
+        logInfo("MineNodeRouter version " + VERSION + " obsługuje logowanie Bedrock");
         RouteTable current;
         try {
             current = routes();
@@ -59,6 +63,14 @@ public final class MineNodeRouter implements Extension {
             return;
         }
 
+        RemoteServer original = event.remoteServer();
+        logInfo("Diagnostyka Bedrock: joinAddress='" + event.connection().joinAddress()
+                + "', host='" + host + "', routes=" + current.size()
+                + ", hosts=" + current.hosts()
+                + ", denied=" + current.isDenied(host)
+                + ", fallback=" + routeDescription(current.fallback())
+                + ", remote=" + routeDescription(original));
+
         RouteTable.Route route = current.route(host);
         if (route == null) {
             if (current.isDenied(host)) {
@@ -69,18 +81,12 @@ public final class MineNodeRouter implements Extension {
                 event.setCancelled(true, current.deniedMessage());
                 return;
             }
-            route = current.fallback();
-            if (route == null) {
-                logInfo("Odrzucono Bedrock " + event.connection().bedrockUsername() + ": nieznany host '" + host
-                        + "' i brak serwera domyślnego z włączonym Bedrockiem");
-                event.setCancelled(true, current.deniedMessage());
-                return;
-            }
-            logInfo("Bedrock " + event.connection().bedrockUsername() + ": nieznany host '" + host
-                    + "' → serwer domyślny " + route.serverId());
+            logInfo("Odrzucono Bedrock " + event.connection().bedrockUsername() + ": nieznany host '" + host + "'");
+            event.setCancelled(true, current.deniedMessage());
+            return;
         }
 
-        RemoteServer original = event.remoteServer();
+        logInfo("Wybrano trasę Bedrock: host='" + host + "' -> " + routeDescription(route));
         event.remoteServer(new RouteRemoteServer(original, route));
         logger().debug("Bedrock " + event.connection().bedrockUsername() + " → " + host
                 + " → " + route.serverId() + " (" + route.address() + ":" + route.port()
@@ -89,7 +95,7 @@ public final class MineNodeRouter implements Extension {
 
     private RouteTable routes() {
         long now = System.currentTimeMillis();
-        if (now - checkedAt < CHECK_INTERVAL_MS) {
+        if (RouteTable.routeCacheFresh(now, checkedAt)) {
             return table;
         }
         checkedAt = now;
@@ -135,14 +141,12 @@ public final class MineNodeRouter implements Extension {
 
     private Path routesPath() {
         Path extensionData = dataFolder();
-        Path direct = extensionData.resolve(ROUTES_FILE);
-        // Geyser versions/platforms have used both the extension data folder itself and
-        // its parent extension directory as the extension dataFolder(). MineNode writes to
-        // extensions/minenode-router/routes.properties, so accept both layouts.
-        Path sibling = extensionData.resolve("../minenode-router").normalize().resolve(ROUTES_FILE);
-        Path path = newestRoutesFile(direct, sibling);
+        List<Path> candidates = findRouteFiles(extensionData);
+        Path path = candidates.isEmpty() ? extensionData.resolve(ROUTES_FILE) : candidates.get(0);
         if (!path.equals(routesPath)) {
             routesPath = path;
+            logInfo("MineNodeRouter version " + VERSION + " aktywny");
+            logInfo("Znalezione pliki tras: " + candidates);
             logger().info("MineNodeRouter używa pliku tras: " + path);
             loadedMtime = Long.MIN_VALUE;
             loadedSize = -1L;
@@ -150,21 +154,36 @@ public final class MineNodeRouter implements Extension {
         return path;
     }
 
-    private Path newestRoutesFile(Path first, Path second) {
-        boolean firstExists = Files.isRegularFile(first);
-        boolean secondExists = Files.isRegularFile(second);
-        if (!firstExists && secondExists) {
-            return second;
+    private List<Path> findRouteFiles(Path extensionData) {
+        List<Path> found = new ArrayList<>();
+        addCandidate(found, extensionData.resolve(ROUTES_FILE));
+        addCandidate(found, extensionData.resolve("minenode-router").resolve(ROUTES_FILE));
+        addCandidate(found, extensionData.resolve("../minenode-router").normalize().resolve(ROUTES_FILE));
+        addCandidate(found, extensionData.resolve("../../extensions/minenode-router").normalize()
+                .resolve(ROUTES_FILE));
+        addCandidate(found, Path.of("/data/bedrock/extensions/minenode-router", ROUTES_FILE));
+        String configuredData = System.getenv("MINENODE_DATA");
+        if (configuredData != null && !configuredData.isBlank()) {
+            addCandidate(found, Path.of(configuredData, "bedrock", "extensions", "minenode-router", ROUTES_FILE));
         }
-        if (firstExists && secondExists) {
-            try {
-                return Files.getLastModifiedTime(second).compareTo(Files.getLastModifiedTime(first)) > 0
-                        ? second : first;
-            } catch (IOException ignored) {
-                // Prefer the normal extension data path if metadata cannot be read.
-            }
+        found.sort(Comparator.comparingLong(this::routeFileScore).reversed());
+        return found;
+    }
+
+    private void addCandidate(List<Path> candidates, Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        if (Files.isRegularFile(normalized) && !candidates.contains(normalized)) {
+            candidates.add(normalized);
         }
-        return first;
+    }
+
+    private long routeFileScore(Path path) {
+        try {
+            // Generated files with route.N/fallback entries are larger than an empty metadata copy.
+            return Files.size(path);
+        } catch (IOException ignored) {
+            return -1L;
+        }
     }
 
     private void logInfo(String message) {
@@ -189,5 +208,21 @@ public final class MineNodeRouter implements Extension {
         } catch (RuntimeException ignored) {
             // Logging must never break a login.
         }
+    }
+
+    private String routeDescription(RouteTable.Route route) {
+        if (route == null) {
+            return "none";
+        }
+        return route.host() + "|" + route.serverId() + "|"
+                + (route.online() ? "online" : "offline") + "|"
+                + route.address() + ":" + route.port();
+    }
+
+    private String routeDescription(RemoteServer remote) {
+        if (remote == null) {
+            return "none";
+        }
+        return remote.address() + ":" + remote.port() + "/" + remote.authType();
     }
 }

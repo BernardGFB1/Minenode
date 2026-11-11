@@ -43,6 +43,8 @@ goto :END
 :DOCKER_READY
 echo ==^> Docker Engine jest gotowy!
 
+:: docker build --no-cache -t "%IMAGE_NAME%" .
+
 :BUILD
 echo ==^> Budowanie obrazu: %IMAGE_NAME%...
 docker build -t "%IMAGE_NAME%" .
