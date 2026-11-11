@@ -23,7 +23,16 @@
             <span v-else-if="v.gateway_error" class="err">{{ $t('błąd') }}</span>
             <span v-else class="pending"><Loader2 class="spin" style="width: 12px; height: 12px" /> {{ $t('Uruchamianie…') }}</span>
           </dd>
+          <dt>{{ $t('Adres połączenia gry') }}</dt>
+          <dd class="mono">{{ v.advertise?.length ? v.advertise.join(', ') : $t('wykrywany automatycznie (STUN)') }}</dd>
         </dl>
+
+        <div v-if="v.advertise_source === 'stun'" class="callout warn small">
+          <AlertTriangle />
+          <div>{{ $t('Panel nie zna publicznego adresu, więc Geyser zgaduje go przez STUN. Za routerem lub w Dockerze często trafia na zły port i gracze widzą serwer, ale nie mogą wejść. Wpisz publiczny adres w ustawieniach panelu.') }}
+            <router-link to="/settings">{{ $t('Ustawienia panelu') }}</router-link>
+          </div>
+        </div>
 
         <div v-if="v.hostnames.length > 1" class="col" style="gap: 6px">
           <span class="small muted">{{ $t('Dostępne adresy') }}</span>

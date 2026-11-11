@@ -688,6 +688,12 @@ const strings = {
   'Bedrock jest niezależny od proxy Java: możesz go włączyć tylko dla wybranych serwerów. Bramka startuje automatycznie, gdy pierwszy serwer ma włączony Bedrock, i zatrzymuje się, gdy żaden go nie używa.': 'Bedrock is independent of the Java proxy: you can enable it for selected servers only. The gateway starts automatically when the first server enables Bedrock and stops when none uses it.',
   'Włączono Bedrock': 'Bedrock enabled',
   'Wyłączono Bedrock': 'Bedrock disabled',
+  'Adres połączenia gry': 'Game connection address',
+  'wykrywany automatycznie (STUN)': 'detected automatically (STUN)',
+  'Panel nie zna publicznego adresu, więc Geyser zgaduje go przez STUN. Za routerem lub w Dockerze często trafia na zły port i gracze widzą serwer, ale nie mogą wejść. Wpisz publiczny adres w ustawieniach panelu.': 'The panel does not know the public address, so Geyser guesses it through STUN. Behind a router or in Docker it often gets the wrong port: players see the server but cannot join. Enter the public address in the panel settings.',
+  'Adres ogłaszany graczom Bedrock (zaawansowane)': 'Address advertised to Bedrock players (advanced)',
+  'np. 203.0.113.10 lub mc.example.com:19132': 'e.g. 203.0.113.10 or mc.example.com:19132',
+  'Adres, pod który gra Bedrock łączy się po znalezieniu serwera. Zostaw puste, aby użyć publicznego adresu powyżej (albo adresu serwera w domenie). Kilka adresów oddziel przecinkami; port jest opcjonalny.': 'The address Bedrock connects to after finding the server. Leave empty to use the public address above (or a server address under the domain). Separate several addresses with commas; the port is optional.',
 
   // backup destinations
   'Miejsca kopii zapasowych': 'Backup destinations',

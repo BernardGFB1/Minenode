@@ -128,6 +128,9 @@ class PanelSettings(BaseModel):
     public_address: str = ""  # shown to users when no base domain is configured
     public_panel_url: str = ""  # optional override for resource pack URLs (otherwise served on the Minecraft port)
     pack_subdomain: str = "packs"  # resource packs: http://<pack_subdomain>.<base_domain>:<proxy port>/rp/…
+    # Bedrock (Geyser NetherNet): addresses sent to players for the game connection, comma-separated, optional
+    # ":port". Empty = public_address / a server hostname, else STUN (unreliable behind NAT that remaps ports).
+    bedrock_advertise: str = ""
     # What the proxy shows for servers that are not running. Placeholders:
     # {name} {motd} {address} {mc_version} {join_hint}
     motd_offline: str = "§f{name}\n§7● Serwer jest wyłączony{join_hint}"

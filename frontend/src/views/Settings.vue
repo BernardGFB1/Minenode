@@ -43,6 +43,13 @@
               <span class="hint">{{ $t('Zostaw puste, aby używać portu Minecrafta. Wpisz adres tylko wtedy, gdy serwujesz paczki przez własny reverse proxy HTTP(S).') }}</span>
             </div>
           </details>
+          <details class="adv">
+            <summary class="small text-2">{{ $t('Adres ogłaszany graczom Bedrock (zaawansowane)') }}</summary>
+            <div class="field" style="margin-top: 10px; max-width: 50%">
+              <input v-model="s.bedrock_advertise" class="input mono" :placeholder="s.public_address || $t('np. 203.0.113.10 lub mc.example.com:19132')" />
+              <span class="hint">{{ $t('Adres, pod który gra Bedrock łączy się po znalezieniu serwera. Zostaw puste, aby użyć publicznego adresu powyżej (albo adresu serwera w domenie). Kilka adresów oddziel przecinkami; port jest opcjonalny.') }}</span>
+            </div>
+          </details>
           <div class="small text-2">{{ $t('Adres paczek:') }} <span class="mono">{{ s.resource_pack_base || '— ' + $t('ustaw domenę bazową lub publiczny adres') + ' —' }}</span></div>
           <div class="callout info small">
             <Info />
@@ -228,7 +235,7 @@ onMounted(load)
 async function save() {
   saving.value = true
   try {
-    s.value = await api.put('/settings', { base_domain: s.value.base_domain, default_server_id: s.value.default_server_id || '', public_address: s.value.public_address, public_panel_url: s.value.public_panel_url || '', pack_subdomain: s.value.pack_subdomain || 'packs' })
+    s.value = await api.put('/settings', { base_domain: s.value.base_domain, default_server_id: s.value.default_server_id || '', public_address: s.value.public_address, public_panel_url: s.value.public_panel_url || '', pack_subdomain: s.value.pack_subdomain || 'packs', bedrock_advertise: s.value.bedrock_advertise || '' })
     toast('Zapisano ustawienia', 'success')
   } catch (e) { toastError(e) } finally { saving.value = false }
 }

@@ -18,7 +18,6 @@ services:
       TZ: Europe/Warsaw
       PUID: "1000"
       PGID: "1000"
-      MINENODE_BEDROCK_SAVED_LOGINS: "zlotyzabek"
       # Optional – admin account created on first start (otherwise a setup wizard runs in the browser).
       # Change the password in the panel after the first login.
       MINENODE_ADMIN_USER: admin

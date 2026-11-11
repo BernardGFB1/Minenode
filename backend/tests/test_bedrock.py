@@ -27,12 +27,14 @@ class FakeInst:
 
 
 class FakeManager:
-    def __init__(self, instances, *, base_domain="", public_address="", default_server_id=None):
+    def __init__(self, instances, *, base_domain="", public_address="", default_server_id=None,
+                 bedrock_advertise=""):
         self.instances = {inst.cfg.id: inst for inst in instances}
         self.settings = SimpleNamespace(
             base_domain=base_domain,
             public_address=public_address,
             default_server_id=default_server_id,
+            bedrock_advertise=bedrock_advertise,
         )
 
 
@@ -145,6 +147,40 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("route.2=example.com|a|online|127.0.0.1|25565", text)
         # Aliases coincide with the subdomain-derived hosts, so there are three unique hosts.
         self.assertEqual(len(routes), 3)
+
+    def test_disabled_hosts_are_denied_and_default_is_fallback(self):
+        a = FakeInst("a", "A", "survival")
+        b = FakeInst("b", "B", "creative", enabled=False, aliases=["play.other.net"])
+        text, _ = make_proxy([a, b], base_domain="mc.example.com", default_server_id="a")._routes_text()
+        self.assertIn("deny.0=creative.mc.example.com", text)
+        self.assertIn("deny.1=play.other.net", text)
+        self.assertNotIn("deny.2", text)  # enabled hosts are never denied
+        self.assertIn("fallback=a|online|127.0.0.1|", text)
+
+    def test_no_fallback_when_default_has_bedrock_off(self):
+        a = FakeInst("a", "A", "survival", enabled=False)
+        b = FakeInst("b", "B", "creative")
+        text, _ = make_proxy([a, b], base_domain="mc.example.com", default_server_id="a")._routes_text()
+        self.assertNotIn("fallback=", text)
+
+    def test_advertise_prefers_settings_then_public_address(self):
+        a = FakeInst("a", "A", "survival")
+        p = make_proxy([a], public_address="79.163.180.236", bedrock_advertise="play.example.net:19133, 10.0.0.5")
+        self.assertEqual(p.advertise_addresses(), (["play.example.net:19133", "10.0.0.5"], "settings"))
+        self.assertIn("advertise-addresses: ['play.example.net:19133', '10.0.0.5']", p._config_text("online"))
+        p = make_proxy([a], public_address="79.163.180.236")
+        self.assertEqual(p.advertise_addresses(), (["79.163.180.236"], "public_address"))
+        p = make_proxy([a], public_address="2001:db8::1")
+        self.assertEqual(p.advertise_addresses()[0], ["[2001:db8::1]"])
+
+    def test_advertise_uses_resolvable_hostname_else_stun(self):
+        a = FakeInst("a", "A", "survival")
+        p = make_proxy([a], base_domain="mc.example.com")
+        with patch.object(bedrock, "_resolves", return_value=True):
+            self.assertEqual(p.advertise_addresses(), (["survival.mc.example.com"], "hostname"))
+        with patch.object(bedrock, "_resolves", return_value=False):
+            self.assertEqual(p.advertise_addresses(), ([], "stun"))
+            self.assertIn("advertise-addresses: []", p._config_text("online"))
 
     def test_yaml_and_property_escaping(self):
         self.assertEqual(bedrock._yaml("it's"), "'it''s'")

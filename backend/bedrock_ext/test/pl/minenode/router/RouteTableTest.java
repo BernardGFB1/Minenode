@@ -18,6 +18,7 @@ public final class RouteTableTest {
         skipsInvalidEntries();
         respectsFirstDuplicate();
         handlesDeniedMessage();
+        handlesDenyAndFallback();
         System.out.println("RouteTableTest: " + checks + " checks passed");
     }
 
@@ -92,6 +93,20 @@ public final class RouteTableTest {
         check(blank.deniedMessage().equals(RouteTable.DEFAULT_DENIED_MESSAGE), "blank denied message falls back");
 
         check(RouteTable.parse(List.of()).size() == 0, "empty input");
+    }
+
+    private static void handlesDenyAndFallback() {
+        RouteTable table = RouteTable.parse(List.of(
+                "route.0=survival.example.com|abc|online|127.0.0.1|25565",
+                "deny.0=creative.example.com",
+                "deny.1=survival.example.com",
+                "fallback=abc|offline|127.0.0.1|25565"));
+        check(table.isDenied("creative.example.com"), "disabled server host is denied");
+        check(!table.isDenied("survival.example.com"), "a routed host is never denied");
+        check(table.fallback() != null && table.fallback().serverId().equals("abc"), "fallback parsed");
+        check(!table.fallback().online(), "fallback auth parsed");
+        check(RouteTable.parse(List.of("fallback=broken")).fallback() == null, "malformed fallback ignored");
+        check(RouteTable.empty().fallback() == null, "empty table has no fallback");
     }
 
     private static void check(boolean condition, String message) {

@@ -79,6 +79,25 @@ def valid_host(host: str) -> bool:
     return bool(HOSTNAME_RE.match(host))
 
 
+_resolve_cache: dict[str, tuple[float, bool]] = {}
+
+
+def _resolves(host: str) -> bool:
+    """Geyser refuses to start signaling when an advertised host name does not resolve – check first (cached)."""
+    import socket
+    now = time.monotonic()
+    hit = _resolve_cache.get(host)
+    if hit and now - hit[0] < 300:
+        return hit[1]
+    try:
+        socket.getaddrinfo(host, None)
+        ok = True
+    except OSError:
+        ok = False
+    _resolve_cache[host] = (now, ok)
+    return ok
+
+
 def _yaml(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
@@ -131,6 +150,7 @@ class BedrockProxy:
         self.geyser_version = ""
         self._route_snapshot: dict[str, "ServerInstance"] = {}
         self._conflicts: list[str] = []
+        self._running_config: str | None = None  # config.yml text Geyser was started with
 
     # ------------------------------------------------------------ state
     def enabled(self) -> bool:
@@ -166,6 +186,8 @@ class BedrockProxy:
             "servers": [i.cfg.id for i in self.m.instances.values() if i.cfg.bedrock_enabled],
             "routes": len(self._route_snapshot),
             "conflicts": self._conflicts,
+            "advertise": self.advertise_addresses()[0],
+            "advertise_source": self.advertise_addresses()[1],
             "log": list(self.log_tail)[-8:] if self.error else [],
         }
 
@@ -229,6 +251,30 @@ class BedrockProxy:
         self._conflicts = conflicts
         return {host: inst for host, inst in owners.items() if inst.cfg.bedrock_enabled}
 
+    def advertise_addresses(self) -> tuple[list[str], str]:
+        """Addresses Geyser sends to Bedrock players for the NetherNet (WebRTC) game connection.
+
+        Left empty, Geyser falls back to this machine's own addresses (the container IP in Docker) plus a
+        STUN-discovered public address. Behind Docker/home routers NAT usually remaps the UDP port, so STUN
+        reports a random port that the router does not forward – players see the server but cannot join.
+        We therefore advertise an explicit public address with the Bedrock port whenever we know one.
+        Returns (addresses, source) where source is "settings", "public_address", "hostname" or "stun".
+        """
+        s = self.m.settings
+        manual = [a.strip() for a in (getattr(s, "bedrock_advertise", "") or "").split(",") if a.strip()]
+        if manual:
+            return manual, "settings"
+        public = normalize_host(s.public_address)
+        if public and valid_host(public):
+            return [f"[{public}]" if ":" in public else public], "public_address"
+        # a server hostname under the base domain resolves through the wildcard record
+        # prefer server subdomains: a wildcard record covers them, the bare base domain often has no record
+        roots = {normalize_host(s.base_domain), public}
+        for host in sorted(self.route_map(), key=lambda h: (h in roots, h)):
+            if not _is_ip(host) and _resolves(host):
+                return [host], "hostname"
+        return [], "stun"
+
     def hosts_for(self, inst: "ServerInstance") -> list[str]:
         return [host for host, routed in self.route_map().items() if routed is inst]
 
@@ -245,12 +291,38 @@ class BedrockProxy:
         for index, (host, inst) in enumerate(routes.items()):
             auth = "online" if inst.online_mode else "offline"
             lines.append(f"route.{index}={host}|{inst.cfg.id}|{auth}|127.0.0.1|{PROXY_PORT}")
+        # Hosts of servers with Bedrock turned off are rejected instead of reaching that server via the Java proxy.
+        for index, host in enumerate(sorted(self.reserved_hosts() - set(routes))):
+            lines.append(f"deny.{index}={host}")
+        # Anything else (LAN IP, unknown name) goes to the default server – like the Java proxy – if it has Bedrock.
+        default = self._default_server()
+        if default is not None and default.cfg.bedrock_enabled:
+            auth = "online" if default.online_mode else "offline"
+            lines.append(f"fallback={default.cfg.id}|{auth}|127.0.0.1|{PROXY_PORT}")
         return "\n".join(lines) + "\n", routes
+
+    def reserved_hosts(self) -> set[str]:
+        """Every hostname any server owns (aliases and subdomains), Bedrock-enabled or not."""
+        s = self.m.settings
+        base, public = normalize_host(s.base_domain), normalize_host(s.public_address)
+        root = base or (public if public and not _is_ip(public) else "")
+        out: set[str] = set()
+        for inst in self.m.instances.values():
+            for alias in inst.cfg.aliases:
+                h = normalize_host(alias)
+                if valid_host(h):
+                    out.add(h)
+            if root:
+                h = normalize_host(f"{inst.cfg.subdomain}.{root}")
+                if valid_host(h):
+                    out.add(h)
+        return out
 
     # ------------------------------------------------------------ generated files
     def _config_text(self, auth_mode: str | None = None) -> str:
         auth_mode = auth_mode or self.auth_mode()
         saved_logins = "[" + ", ".join(_yaml(name) for name in BEDROCK_SAVED_LOGINS) + "]"
+        advertise = "[" + ", ".join(_yaml(a) for a in self.advertise_addresses()[0]) + "]"
         return (
             "# Generated by MineNode. Portable settings only: Geyser adds its own defaults on start.\n"
             "bedrock:\n"
@@ -260,7 +332,7 @@ class BedrockProxy:
             "  transport: nethernet\n"
             "  signaling:\n"
             "    mode: builtin\n"
-            "    advertise-addresses: []\n"
+            f"    advertise-addresses: {advertise}\n"
             "    stun-discovery: true\n"
             "java:\n"
             "  address: '127.0.0.1'\n"
@@ -379,10 +451,11 @@ class BedrockProxy:
             self._write_routes()
 
             desired_auth = self.auth_mode()
-            if self.running and self._running_auth != desired_auth:
-                # Geyser reads java.auth-type only at startup. Changing it restarts Geyser
-                # alone; the Java proxy and every Minecraft server keep running.
-                log.info("Bedrock auth mode changed %s -> %s; restarting Geyser",
+            desired_config = self._config_text(desired_auth)
+            if self.running and self._running_config != desired_config:
+                # Geyser reads config.yml (auth type, advertised addresses…) only at startup. A change
+                # restarts Geyser alone; the Java proxy and every Minecraft server keep running.
+                log.info("Bedrock gateway config changed (auth %s -> %s); restarting Geyser",
                          self._running_auth, desired_auth)
                 await self._stop_process()
 
@@ -394,6 +467,8 @@ class BedrockProxy:
                 return
             self._write_config(desired_auth)
             await self._start_process(desired_auth)
+            if self.running:
+                self._running_config = desired_config
 
     async def _start_process(self, auth_mode: str) -> None:
         try:
@@ -419,6 +494,7 @@ class BedrockProxy:
         except Exception as exc:  # noqa: BLE001
             self.error = f"Nie udało się uruchomić Geysera: {exc}"
             self._running_auth = None
+            self._running_config = None
             self._next_start = time.monotonic() + RESTART_DELAY
             log.exception("Bedrock gateway failed to start")
 
@@ -430,8 +506,11 @@ class BedrockProxy:
                 if not text:
                     continue
                 self._append_log(text)
-                if "signaling started" in text.lower():
+                low = text.lower()
+                if "signaling started" in low:
                     self.listening = True
+                elif "signaling will not start" in low or "signaling could not start" in low:
+                    self.error = f"Signaling Bedrock nie wystartował: {text[:400]}"
                 log.info("[Geyser] %s", text)
         except asyncio.CancelledError:
             raise
@@ -446,6 +525,7 @@ class BedrockProxy:
                 self.proc = None
                 self.listening = False
                 self._running_auth = None
+                self._running_config = None
                 self._log_task = None
                 if not self._stopping:
                     tail = next(
@@ -470,6 +550,7 @@ class BedrockProxy:
         proc, self.proc = self.proc, None
         self.listening = False
         self._running_auth = None
+        self._running_config = None
         if proc is None:
             await self._cancel_log_task()
             return

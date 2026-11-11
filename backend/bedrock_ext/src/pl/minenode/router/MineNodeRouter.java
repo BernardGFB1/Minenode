@@ -61,13 +61,23 @@ public final class MineNodeRouter implements Extension {
 
         RouteTable.Route route = current.route(host);
         if (route == null) {
-            // Geyser forwards the original hostname to the configured Java proxy. The Java proxy
-            // is the authoritative router and can still resolve a route when this extension's
-            // hot-reloaded copy is briefly stale (for example during an atomic file replace).
-            // Do not reject a valid connection based only on a stale extension-side snapshot.
-            logWarning("Brak lokalnej trasy Bedrock dla hosta " + host
-                    + "; przekazuję do głównego proxy Java z zachowaniem hostname");
-            return;
+            if (current.isDenied(host)) {
+                // The host belongs to a server with Bedrock turned off: without this the Java proxy
+                // would still route the forwarded hostname to that server.
+                logInfo("Odrzucono Bedrock " + event.connection().bedrockUsername() + ": host " + host
+                        + " należy do serwera bez włączonego Bedrocka");
+                event.setCancelled(true, current.deniedMessage());
+                return;
+            }
+            route = current.fallback();
+            if (route == null) {
+                logInfo("Odrzucono Bedrock " + event.connection().bedrockUsername() + ": nieznany host '" + host
+                        + "' i brak serwera domyślnego z włączonym Bedrockiem");
+                event.setCancelled(true, current.deniedMessage());
+                return;
+            }
+            logInfo("Bedrock " + event.connection().bedrockUsername() + ": nieznany host '" + host
+                    + "' → serwer domyślny " + route.serverId());
         }
 
         RemoteServer original = event.remoteServer();
@@ -155,6 +165,14 @@ public final class MineNodeRouter implements Extension {
             }
         }
         return first;
+    }
+
+    private void logInfo(String message) {
+        try {
+            logger().info(message);
+        } catch (RuntimeException ignored) {
+            // Logging must never break a login.
+        }
     }
 
     private void logWarning(String message) {

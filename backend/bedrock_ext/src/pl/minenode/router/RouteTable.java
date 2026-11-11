@@ -3,10 +3,12 @@ package pl.minenode.router;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Immutable hostname-to-server routing table for the shared MineNode Bedrock gateway.
@@ -24,15 +26,19 @@ public final class RouteTable {
     }
 
     private final Map<String, Route> routes;
+    private final Set<String> denied;
+    private final Route fallback;
     private final String deniedMessage;
 
-    private RouteTable(Map<String, Route> routes, String deniedMessage) {
+    private RouteTable(Map<String, Route> routes, Set<String> denied, Route fallback, String deniedMessage) {
         this.routes = Collections.unmodifiableMap(routes);
+        this.denied = Collections.unmodifiableSet(denied);
+        this.fallback = fallback;
         this.deniedMessage = deniedMessage;
     }
 
     public static RouteTable empty() {
-        return new RouteTable(new LinkedHashMap<>(), DEFAULT_DENIED_MESSAGE);
+        return new RouteTable(new LinkedHashMap<>(), new HashSet<>(), null, DEFAULT_DENIED_MESSAGE);
     }
 
     /**
@@ -41,6 +47,8 @@ public final class RouteTable {
      */
     public static RouteTable parse(List<String> lines) {
         List<Route> parsed = new ArrayList<>();
+        Set<String> deniedHosts = new HashSet<>();
+        Route fallback = null;
         String denied = null;
 
         for (String raw : lines) {
@@ -62,37 +70,28 @@ public final class RouteTable {
                 denied = unescape(value);
                 continue;
             }
+            if (key.startsWith("deny.")) {
+                String host = normalizeHost(value);
+                if (!host.isEmpty()) {
+                    deniedHosts.add(host);
+                }
+                continue;
+            }
+            if (key.equals("fallback")) {
+                // fallback=serverId|online|address|port – the default server for unknown hosts
+                Route parsedFallback = parseRoute("*|" + value);
+                if (parsedFallback != null) {
+                    fallback = parsedFallback;
+                }
+                continue;
+            }
             if (!key.startsWith("route.")) {
                 continue;
             }
-
-            String[] parts = value.split("\\|", 5);
-            if (parts.length != 5) {
-                continue;
+            Route route = parseRoute(value);
+            if (route != null) {
+                parsed.add(route);
             }
-            String host = normalizeHost(parts[0]);
-            String serverId = parts[1].strip();
-            String auth = parts[2].strip();
-            String address = parts[3].strip();
-            int port;
-            try {
-                port = Integer.parseInt(parts[4].strip());
-            } catch (NumberFormatException exc) {
-                continue;
-            }
-            if (host.isEmpty() || serverId.isEmpty() || address.isEmpty() || port < 1 || port > 65535) {
-                continue;
-            }
-
-            boolean online;
-            if (auth.equalsIgnoreCase("online")) {
-                online = true;
-            } else if (auth.equalsIgnoreCase("offline")) {
-                online = false;
-            } else {
-                continue;
-            }
-            parsed.add(new Route(host, serverId, online, address, port));
         }
 
         Map<String, Route> routes = new LinkedHashMap<>();
@@ -100,10 +99,42 @@ public final class RouteTable {
             // The backend already rejects ambiguous hostnames; first one wins here as well.
             routes.putIfAbsent(route.host(), route);
         }
+        deniedHosts.removeAll(routes.keySet());
         if (denied == null || denied.isBlank()) {
             denied = DEFAULT_DENIED_MESSAGE;
         }
-        return new RouteTable(routes, denied);
+        return new RouteTable(routes, deniedHosts, fallback, denied);
+    }
+
+    /** Parses {@code host|serverId|online|address|port}; returns null for a malformed entry. */
+    private static Route parseRoute(String value) {
+        String[] parts = value.split("\\|", 5);
+        if (parts.length != 5) {
+            return null;
+        }
+        String host = normalizeHost(parts[0]);
+        String serverId = parts[1].strip();
+        String auth = parts[2].strip();
+        String address = parts[3].strip();
+        int port;
+        try {
+            port = Integer.parseInt(parts[4].strip());
+        } catch (NumberFormatException exc) {
+            return null;
+        }
+        if (host.isEmpty() || serverId.isEmpty() || address.isEmpty() || port < 1 || port > 65535) {
+            return null;
+        }
+
+        boolean online;
+        if (auth.equalsIgnoreCase("online")) {
+            online = true;
+        } else if (auth.equalsIgnoreCase("offline")) {
+            online = false;
+        } else {
+            return null;
+        }
+        return new Route(host, serverId, online, address, port);
     }
 
     /** Normalizes what a Bedrock client typed into a bare, lowercase hostname. */
@@ -156,6 +187,16 @@ public final class RouteTable {
 
     public Route route(String normalizedHost) {
         return routes.get(normalizedHost == null ? "" : normalizedHost);
+    }
+
+    /** True when the host belongs to a MineNode server that has Bedrock turned off. */
+    public boolean isDenied(String normalizedHost) {
+        return normalizedHost != null && denied.contains(normalizedHost);
+    }
+
+    /** Default server for hosts that are not in the table, or null when unknown hosts are rejected. */
+    public Route fallback() {
+        return fallback;
     }
 
     public String deniedMessage() {

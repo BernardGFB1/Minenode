@@ -227,6 +227,7 @@ class SettingsBody(BaseModel):
     public_address: Optional[str] = None
     public_panel_url: Optional[str] = None
     pack_subdomain: Optional[str] = Field(default=None, max_length=63)
+    bedrock_advertise: Optional[str] = Field(default=None, max_length=300)
     motd_offline: Optional[str] = Field(default=None, max_length=300)
     motd_starting: Optional[str] = Field(default=None, max_length=300)
     version_offline: Optional[str] = Field(default=None, max_length=80)
@@ -250,6 +251,12 @@ async def put_settings(body: SettingsBody, _: str = Depends(auth.require_user)):
         s.curseforge_api_key = "" if body.curseforge_api_key == "-" else body.curseforge_api_key.strip()
     if body.public_address is not None:
         s.public_address = body.public_address.strip()
+    if body.bedrock_advertise is not None:
+        parts = [p.strip() for p in body.bedrock_advertise.split(",") if p.strip()]
+        for p in parts:
+            if not re.match(r"^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?$", p):
+                raise HTTPException(400, f"Niepoprawny adres Bedrock: {p}")
+        s.bedrock_advertise = ", ".join(parts)
     for key in TEXT_SETTINGS:
         val = getattr(body, key)
         if val is not None:
@@ -1498,6 +1505,8 @@ def _bedrock_state(inst: ServerInstance) -> dict:
         "gateway_log": stats.get("log", []),
         "gateway_version": stats.get("version"),
         "conflicts": stats.get("conflicts", []),
+        "advertise": stats.get("advertise", []),
+        "advertise_source": stats.get("advertise_source"),
         "running": inst.running,
     }
 

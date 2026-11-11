@@ -74,7 +74,7 @@ services:
 2. Add a wildcard DNS record: `*.mc.example.com  A  <server IP>` (optionally also `mc.example.com`).
 3. Each server gets its own subdomain (e.g. `survival`), so players join `survival.mc.example.com`.
 
-Connections by IP or to an unknown name go to the *default server* (set in the panel). You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings. Bedrock players use the same hostnames on port `19132` (see [Bedrock Edition](#bedrock-edition-geyser)); unknown Bedrock addresses are rejected.
+Connections by IP or to an unknown name go to the *default server* (set in the panel). You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings. Bedrock players use the same hostnames on port `19132` (see [Bedrock Edition](#bedrock-edition-geyser)). Like on Java, unknown Bedrock addresses go to the default server (if it has Bedrock enabled), otherwise they are rejected.
 
 ### Resource packs
 
@@ -97,8 +97,9 @@ MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser
 1. Open **Server → Settings → Bedrock Edition (Geyser)** and enable *Share via Bedrock* for the servers you want. Geyser is enabled independently of the Java proxy and does not affect it.
 2. Open **TCP and UDP** port `19132` on your firewall and router. NetherNet uses TCP signalling and UDP gameplay on the same port.
 3. Players add a server in Bedrock with the same address Java players use, e.g. `survival.mc.example.com`, port `19132`. The address must resolve on the player's device; Bedrock has no SRV records.
+4. Set **Public address** in the panel settings (or *Address advertised to Bedrock players*). After finding the server, Bedrock opens the game connection to the address Geyser advertises. Without one, Geyser guesses the public address through STUN, and behind Docker or a home router NAT usually picks a random port that is not forwarded: players see the server but cannot join. If no public address is set, MineNode advertises a server hostname under the base domain when it resolves.
 
-Port `19132` is shared by every server, so there is no per-server Bedrock port to open. Disabled servers keep their hostnames reserved: connecting to a Bedrock-disabled server's address is rejected instead of landing on another server. Enabling the first server downloads Geyser and Java 21 automatically; the gateway starts when the first server enables Bedrock and stops when none do.
+Port `19132` is shared by every server, so there is no per-server Bedrock port to open. Disabled servers keep their hostnames reserved: connecting to a Bedrock-disabled server's address is rejected instead of reaching that server or landing on another one. Enabling the first server downloads Geyser and Java 21 automatically; the gateway starts when the first server enables Bedrock and stops when none do.
 
 **Authentication:** Geyser has one global auth mode. If **any** enabled Bedrock server runs in online mode, MineNode sets `auth-type: online`, and every Bedrock player must have a Java Edition account linked to their Xbox account. When all enabled Bedrock servers are offline-mode, MineNode switches to `offline`, so Bedrock players do not need Java Edition. The mode is re-evaluated automatically, and only Geyser restarts when it changes — the Java proxy and servers never restart. Letting Bedrock players join an online-mode server without Java Edition requires Floodgate, which MineNode does not install yet.
 
