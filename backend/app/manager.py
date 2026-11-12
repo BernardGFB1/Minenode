@@ -27,6 +27,7 @@ from .store import JsonStore
 
 log = logging.getLogger("minenode")
 
+DEFAULT_ICON = Path(__file__).resolve().parent / "assets" / "server-icon.png"
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 CTRL_RE = re.compile(r"\x1b\[[0-9;?]*[ABCDEFGHJKSTfhlnsu]|\x1b\][^\x07]*\x07|\r")
 NAME = r"([A-Za-z0-9_]{1,16})"
@@ -305,6 +306,7 @@ class ServerInstance:
                 (self.dir / "eula.txt").write_text(
                     "# Zaakceptowano przez MineNode (https://aka.ms/MinecraftEULA)\neula=true\n")
             self._enforce_properties(initial=True)
+            self.ensure_default_icon()
             self.cfg.installed = True
             self.m.save_server(self.cfg)
             log(f"Instalacja zakończona w {time.time() - started:.0f} s. Serwer jest gotowy do uruchomienia.")
@@ -315,6 +317,20 @@ class ServerInstance:
             logging.getLogger("minenode").exception("install failed")
             self.set_job(None)
             self.set_state("offline" if self.cfg.installed else "install_failed")
+
+    def ensure_default_icon(self) -> bool:
+        """Give a server without its own server-icon.png the MineNode icon (64×64 PNG).
+
+        An icon that is already there – uploaded, or shipped by a modpack – is never replaced."""
+        icon = self.dir / "server-icon.png"
+        if icon.exists() or not DEFAULT_ICON.is_file():
+            return False
+        try:
+            shutil.copyfile(DEFAULT_ICON, icon)
+        except OSError as exc:
+            logging.getLogger("minenode").warning("Could not write the default server icon: %s", exc)
+            return False
+        return True
 
     def _enforce_properties(self, initial: bool = False) -> None:
         path = self.dir / "server.properties"
