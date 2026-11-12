@@ -14,7 +14,7 @@
           <div class="card-head"><span class="step">1</span><h3>{{ $t('Silnik serwera') }}</h3></div>
           <div class="card-body engines">
             <button v-for="(e, key) in engines" :key="key" type="button" class="engine" :class="{ active: form.type === key }" @click="form.type = key">
-              <div class="etile" :style="{ background: ENGINE_META[key].color, color: ENGINE_META[key].ink || '#10140f' }">{{ ENGINE_META[key].letter }}</div>
+              <EngineIcon :engine="key" class="eicon" />
               <div class="grow" style="min-width: 0">
                 <div class="row" style="gap: 6px"><b>{{ e.name }}</b>
                   <span v-if="e.plugins" class="badge blue">{{ $t('Pluginy') }}</span>
@@ -89,11 +89,12 @@ import { useRouter } from 'vue-router'
 import { Package, CheckCircle2, Coffee, Loader2, Rocket } from 'lucide-vue-next'
 import VersionPicker from '../components/VersionPicker.vue'
 import RamPicker from '../components/RamPicker.vue'
+import EngineIcon from '../components/EngineIcon.vue'
 import { api } from '../api'
 import { toast, toastError } from '../store'
 import { t } from '../i18n'
 import { refreshFleet, fleet } from '../servers'
-import { ENGINE_META, formatMB, slugify } from '../utils'
+import { formatMB, slugify } from '../utils'
 
 const router = useRouter()
 const engines = ref({})
@@ -143,7 +144,7 @@ async function create() {
 .engine { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; position: relative; }
 .engine:hover { border-color: var(--border-strong); }
 .engine.active { border-color: var(--accent); background: var(--accent-soft); }
-.etile { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; }
+.eicon { width: 36px; height: 36px; flex: none; color: var(--text); }
 .check { width: 18px; height: 18px; color: var(--accent); position: absolute; top: 10px; right: 10px; }
 .eula { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; font-size: 13px; }
 .eula input { margin-top: 2px; }
