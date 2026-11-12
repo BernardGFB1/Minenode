@@ -17,6 +17,7 @@ import json
 import logging
 import socket
 import struct
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ log = logging.getLogger("minenode.proxy")
 HANDSHAKE_TIMEOUT = 8
 MAX_HANDSHAKE = 2048
 PROXY_V2_SIG = b"\r\n\r\n\x00\r\nQUIT\n"
+TCP_CONNECTION_INFO = 0x106  # macOS equivalent of Linux TCP_INFO
 
 
 class ProtocolError(Exception):
@@ -135,6 +137,19 @@ class MinecraftProxy:
         self.started_at = time.time()
         self.error: str | None = None
         self.http_served = 0
+        # server id -> lowercase player name -> client socket of the live game connection
+        self.sessions: dict[str, dict[str, object]] = {}
+
+    def player_pings(self, sid: str) -> dict[str, int | None]:
+        """Network round-trip time (ms) of each player's connection, read on demand from the kernel.
+
+        Players that reach the proxy over loopback (Bedrock players through Geyser, local tools)
+        get ``None``: the loopback RTT says nothing about the player's real connection.
+        """
+        out: dict[str, int | None] = {}
+        for name, sock in list(self.sessions.get(sid, {}).items()):
+            out[name] = None if _is_loopback(sock) else tcp_rtt_ms(sock)
+        return out
 
     def stats(self) -> dict:
         return {"host": self.host, "port": self.port, "active": self.active, "total": self.total,
@@ -168,7 +183,7 @@ class MinecraftProxy:
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ProtocolError, ConnectionError):
             await self._close(writer)
         except _Piped as piped:
-            await self._pipe(reader, writer, piped.r, piped.w, piped.inst)
+            await self._pipe(reader, writer, piped.r, piped.w, piped.inst, piped.player)
         except _Http as req:
             await self._serve_http(writer, req.method, req.path)
         except Exception:
@@ -254,7 +269,7 @@ class MinecraftProxy:
             up_w.write(proxy_v2_header(peer, local))
         up_w.write(buffered)
         await up_w.drain()
-        raise _Piped(up_r, up_w, inst)
+        raise _Piped(up_r, up_w, inst, player if next_state in (2, 3) else None)
 
     @staticmethod
     def _not_whitelisted(inst: "ServerInstance", player: str) -> bool:
@@ -366,10 +381,14 @@ class MinecraftProxy:
         finally:
             await self._close(writer)
 
-    async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance") -> None:
+    async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance", player: str | None = None) -> None:
         sid = inst.cfg.id
         self.active += 1
         self.per_server[sid] = self.per_server.get(sid, 0) + 1
+        sock = c_w.get_extra_info("socket")
+        key = player.lower() if player else None
+        if key and sock is not None:
+            self.sessions.setdefault(sid, {})[key] = sock
 
         async def copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, up: bool) -> None:
             try:
@@ -402,6 +421,11 @@ class MinecraftProxy:
         finally:
             self.active -= 1
             self.per_server[sid] = max(0, self.per_server.get(sid, 1) - 1)
+            live = self.sessions.get(sid, {})
+            if key and live.get(key) is sock:  # a reconnect may already have replaced this entry
+                del live[key]
+                if not live:
+                    self.sessions.pop(sid, None)
             await self._close(c_w)
             await self._close(s_w)
 
@@ -421,6 +445,33 @@ class _Http(Exception):
 class _Piped(Exception):
     """Control-flow signal: the handshake was routed, start piping outside of the timeout scope."""
 
-    def __init__(self, r, w, inst):
+    def __init__(self, r, w, inst, player=None):
         super().__init__()
-        self.r, self.w, self.inst = r, w, inst
+        self.r, self.w, self.inst, self.player = r, w, inst, player
+
+
+def tcp_rtt_ms(sock) -> int | None:
+    """Smoothed TCP round-trip time of a connected socket in milliseconds, or None if unavailable."""
+    try:
+        if sys.platform.startswith("linux"):
+            # struct tcp_info: 8 bytes of u8 fields, then u32s; tcpi_rtt (µs) is the 16th u32.
+            raw = sock.getsockopt(socket.IPPROTO_TCP, getattr(socket, "TCP_INFO", 11), 104)
+            if len(raw) >= 72:
+                rtt = struct.unpack_from("=I", raw, 68)[0] / 1000
+                return max(1, round(rtt)) if rtt > 0 else None
+        elif sys.platform == "darwin":
+            # struct tcp_connection_info: 4 bytes of u8 fields, then u32s; tcpi_srtt (ms) at offset 44.
+            raw = sock.getsockopt(socket.IPPROTO_TCP, TCP_CONNECTION_INFO, 64)
+            if len(raw) >= 48:
+                rtt = struct.unpack_from("=I", raw, 44)[0]
+                return max(1, rtt) if rtt > 0 else None
+    except (OSError, ValueError, struct.error):
+        pass
+    return None
+
+
+def _is_loopback(sock) -> bool:
+    try:
+        return ipaddress.ip_address(sock.getpeername()[0].split("%", 1)[0]).is_loopback
+    except (OSError, ValueError, IndexError, TypeError):
+        return False

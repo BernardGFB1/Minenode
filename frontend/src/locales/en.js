@@ -263,6 +263,8 @@ const strings = {
   'Brak logów.': 'No logs.',
   'Online teraz': 'Online now',
   'Nikt nie gra.': 'Nobody is playing.',
+  'Opóźnienie połączenia, odświeżane co 30 s': 'Connection latency, refreshed every 30 s',
+  'Brak pomiaru – gracz Bedrock albo połączenie spoza proxy': 'Not measured – Bedrock player or a connection that bypasses the proxy',
   'Informacje': 'Information',
   'Loader / build': 'Loader / build',
   'wymagana {j}+': 'requires {j}+',

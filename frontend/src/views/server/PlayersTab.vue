@@ -28,7 +28,10 @@
         <div class="plist">
           <div v-for="p in d.online" :key="p" class="prow">
             <img :src="head(p)" alt="" referrerpolicy="no-referrer" />
-            <b class="grow">{{ p }}</b>
+            <div class="grow pname">
+              <b :title="p">{{ p }}</b>
+              <span class="pms" :class="pingClass(pings[p])" :title="pings[p] == null ? $t('Brak pomiaru – gracz Bedrock albo połączenie spoza proxy') : $t('Opóźnienie połączenia, odświeżane co 30 s')"><Signal /> {{ pings[p] == null ? '—' : `${pings[p]} ms` }}</span>
+            </div>
             <button v-if="!isOp(p)" class="btn sm" @click="opAdd(p)"><Crown /> {{ $t('OP') }}</button>
             <button class="btn sm ghost" @click="kick(p)">{{ $t('Wyrzuć') }}</button>
             <button class="btn sm ghost danger" @click="ban(p)">{{ $t('Ban') }}</button>
@@ -90,16 +93,18 @@
 </template>
 <script setup>
 import { inject, onMounted, reactive, ref, watch } from 'vue'
-import { UserRoundPlus, CheckCheck, Plus, X, Info, Radio, Crown, ListChecks, Ban, Trash2, Loader2 } from 'lucide-vue-next'
+import { UserRoundPlus, CheckCheck, Plus, X, Info, Radio, Crown, ListChecks, Ban, Trash2, Loader2, Signal } from 'lucide-vue-next'
 import Toggle from '../../components/Toggle.vue'
 import { api } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
 import { timeAgo } from '../../utils'
 import { t } from '../../i18n'
+import { usePlayerPings, pingClass } from '../../pings'
 
 const live = inject('live')
 const id = live.summary.id
 const d = ref(null)
+const { pings } = usePlayerPings(() => id, () => d.value?.online)
 const wlName = ref('')
 const opName = ref('')
 const opLevel = ref(4)
@@ -158,6 +163,13 @@ const pardon = (name) => act(() => api.del(`/servers/${id}/players/bans/${name}`
 .prow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm); }
 .prow:hover { background: var(--surface-2); }
 .prow img { width: 30px; height: 30px; border-radius: 6px; image-rendering: pixelated; background: var(--surface-3); flex: none; }
+.pname { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pname b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pms { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pms svg { width: 12px; height: 12px; }
+.pms.green { color: var(--accent); }
+.pms.amber { color: var(--warn); }
+.pms.red { color: var(--danger); }
 .addrow { display: flex; gap: 8px; padding: 12px 18px 4px; }
 .empty { padding: 20px; }
 </style>

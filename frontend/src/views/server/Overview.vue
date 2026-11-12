@@ -48,7 +48,7 @@
           <div class="card-body">
             <div v-if="!s.players?.length" class="muted small">{{ $t('Nikt nie gra.') }}</div>
             <div v-else class="row wrap" style="gap: 8px">
-              <span v-for="p in s.players" :key="p" class="player"><img :src="`https://mc-heads.net/avatar/${p}/24`" alt="" referrerpolicy="no-referrer" />{{ p }}</span>
+              <span v-for="p in s.players" :key="p" class="player"><img :src="`https://mc-heads.net/avatar/${p}/24`" alt="" referrerpolicy="no-referrer" />{{ p }}<span v-if="pings[p] != null" class="pms" :class="pingClass(pings[p])" :title="$t('Opóźnienie połączenia, odświeżane co 30 s')">{{ pings[p] }} ms</span></span>
             </div>
           </div>
         </div>
@@ -75,10 +75,12 @@ import { Timer, Users, Cpu, MemoryStick, ArrowRight } from 'lucide-vue-next'
 import AreaChart from '../../components/AreaChart.vue'
 import Meter from '../../components/Meter.vue'
 import { api } from '../../api'
+import { usePlayerPings, pingClass } from '../../pings'
 import { ENGINE_META, STATE, ansiToHtml, formatBytes, formatDuration, formatMB } from '../../utils'
 
 const live = inject('live')
 const s = computed(() => live.summary)
+const { pings } = usePlayerPings(() => s.value.id, () => s.value.players)
 const running = computed(() => ['online', 'starting', 'stopping'].includes(s.value.state))
 const now = ref(Date.now() / 1000)
 const disk = ref(null)
@@ -108,6 +110,10 @@ onUnmounted(() => clearInterval(t))
 .tl-line.cmd { color: #a6e07f; }
 .player { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; }
 .player img { width: 22px; height: 22px; border-radius: 50%; image-rendering: pixelated; }
+.pms { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pms.green { color: var(--accent); }
+.pms.amber { color: var(--warn); }
+.pms.red { color: var(--danger); }
 .info { display: grid; grid-template-columns: auto 1fr; gap: 9px 16px; margin: 0; padding: 16px 20px; font-size: 13px; }
 .info dt { color: var(--muted); }
 .info dd { margin: 0; text-align: right; overflow-wrap: anywhere; }

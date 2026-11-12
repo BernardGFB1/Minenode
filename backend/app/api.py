@@ -620,6 +620,17 @@ async def get_players(sid: str, _: str = Depends(auth.require_user)):
     }
 
 
+@router.get("/servers/{sid}/players/ping")
+async def get_player_pings(sid: str, _: str = Depends(auth.require_user)):
+    """Ping (TCP round-trip time, ms) of every online player; measured only when the panel asks.
+
+    ``None`` means no measurement: the player is not connected through the proxy (e.g. Bedrock
+    through Geyser, or a direct connection to the internal port)."""
+    inst = inst_or_404(sid)
+    measured = manager.proxy.player_pings(sid) if manager.proxy else {}
+    return {"pings": {name: measured.get(name.lower()) for name in sorted(inst.online)}}
+
+
 class NameBody(BaseModel):
     name: str
     level: int = Field(default=4, ge=1, le=4)
