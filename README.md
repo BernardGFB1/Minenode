@@ -24,6 +24,8 @@ A self-hosted panel for running Minecraft servers. It ships as a single Docker c
 - **Backups anywhere**: consistent backups (`save-off` / `save-all flush`) with scheduling and per-destination retention. You can store them on the panel disk, a **mounted folder** (NAS share, second disk), **S3-compatible storage** (AWS, Backblaze B2, Cloudflare R2, Wasabi, MinIO) or **WebDAV** (Nextcloud, ownCloud, Synology), and on several at once. Download and restore work from any of them.
 - **English and Polish UI**: switch the language in the sidebar or on the login screen.
 
+![Creating a server – pick the engine and Minecraft version, Java is chosen automatically](docs/screenshots/new-server.webp)
+
 ---
 
 ## Quick start
@@ -33,6 +35,8 @@ docker compose up -d
 ```
 
 Open `http://<host>:8080`. On first visit a setup wizard asks you to create the administrator account, unless you set `MINENODE_ADMIN_USER` / `MINENODE_ADMIN_PASSWORD`.
+
+![MineNode sign-in screen](docs/screenshots/login.webp)
 
 | Port | Purpose |
 |------|---------|
