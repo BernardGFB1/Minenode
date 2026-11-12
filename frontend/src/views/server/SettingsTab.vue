@@ -72,8 +72,9 @@
 
     <section class="card danger-zone">
       <div class="card-head"><AlertOctagon class="hi" /><h3>{{ $t('Strefa niebezpieczna') }}</h3></div>
-      <div class="card-body row">
+      <div class="card-body row wrap">
         <div class="grow"><b>{{ $t('Usuń serwer') }}</b><div class="small muted">{{ $t('Usuwa pliki serwera i jego kopie na dysku panelu. Nieodwracalne.') }}</div></div>
+        <button class="btn" :disabled="exporting || live.summary.state === 'online'" @click="exportServer"><Download /> {{ exporting ? $t('Eksportowanie…') : $t('Eksportuj .minenodepack') }}</button>
         <button class="btn danger" @click="remove"><Trash2 /> {{ $t('Usuń serwer') }}</button>
       </div>
     </section>
@@ -87,7 +88,7 @@ import Toggle from '../../components/Toggle.vue'
 import VersionPicker from '../../components/VersionPicker.vue'
 import VoiceChatCard from '../../components/VoiceChatCard.vue'
 import BedrockCard from '../../components/BedrockCard.vue'
-import { api } from '../../api'
+import { api, download } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
 import { refreshFleet } from '../../servers'
 import { ENGINE_META } from '../../utils'
@@ -100,6 +101,7 @@ const c = ref(null)
 const aliases = ref('')
 const settings = ref(null)
 const saving = ref(false)
+const exporting = ref(false)
 const re = reactive({ type: live.summary.type, mc_version: live.summary.mc_version, loader_version: null })
 
 onMounted(async () => {
@@ -135,6 +137,10 @@ async function reinstall() {
   })
   if (!ok) return
   try { await api.post(`/servers/${id}/reinstall`, { ...re }); router.push(`/servers/${id}/console`) } catch (e) { toastError(e) }
+}
+async function exportServer() {
+  exporting.value = true
+  try { download(`/servers/${id}/export`); toast('Eksport rozpoczęty', 'success') } catch (e) { toastError(e) } finally { exporting.value = false }
 }
 async function remove() {
   const ok = await confirmDialog({ title: 'Usunąć serwer?', message: 'Pliki serwera i kopie na dysku panelu zostaną trwale usunięte. Kopie w zewnętrznych miejscach (NAS, S3, WebDAV) zostaną zachowane.', confirmText: 'Usuń na zawsze', danger: true, typeToConfirm: live.summary.name })

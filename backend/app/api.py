@@ -18,10 +18,11 @@ import psutil
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
+from starlette.background import BackgroundTask
 from starlette.websockets import WebSocketDisconnect
 
 from . import storage as storage_mod
-from . import bedrock_compat
+from . import bedrock_compat, packs
 from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
@@ -52,7 +53,7 @@ def run_errors(fn):
     async def wrapper(*a, **kw):
         try:
             return await fn(*a, **kw)
-        except (ServerError, modpacks.ModpackError, ValueError) as exc:
+        except (ServerError, modpacks.ModpackError, packs.PackError, ValueError) as exc:
             raise HTTPException(400, str(exc))
         except ValidationError as exc:
             raise HTTPException(422, "; ".join(e["msg"] for e in exc.errors()))
@@ -361,6 +362,41 @@ async def create_server(body: CreateServer, _: str = Depends(auth.require_user))
                           subdomain=_unique_subdomain(body.subdomain, body.name), java=body.java.model_dump())
     await inst.install(eula=True)
     return inst.summary()
+
+
+@router.get("/servers/{sid}/export")
+async def export_server(sid: str, _: str = Depends(auth.require_user)):
+    """Download a complete, portable server package."""
+    inst = inst_or_404(sid)
+    try:
+        path = await asyncio.to_thread(packs.create, inst)
+    except packs.PackError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return FileResponse(path, filename=f"{inst.cfg.subdomain}.minenodepack",
+                        media_type="application/octet-stream",
+                        background=BackgroundTask(path.unlink, missing_ok=True))
+
+
+@router.post("/servers/import")
+@run_errors
+async def import_server(
+    file: UploadFile = File(...), name: str = Form(""), subdomain: str = Form(""),
+    _: str = Depends(auth.require_user),
+):
+    """Import a complete server into a new instance."""
+    filename = Path(file.filename or "server.minenodepack").name
+    if not filename.lower().endswith(".minenodepack"):
+        raise HTTPException(400, "Wybierz plik z rozszerzeniem .minenodepack")
+    dest = TMP_DIR / f"import-{int(time.time() * 1000)}-{filename}"
+    try:
+        with open(dest, "wb") as fh:
+            await asyncio.to_thread(shutil.copyfileobj, file.file, fh, 1024 * 1024)
+        await asyncio.to_thread(packs.validate, dest)
+        inst = await asyncio.to_thread(packs.import_pack, dest, manager, name.strip() or None,
+                                       subdomain.strip() or None)
+        return inst.summary()
+    finally:
+        dest.unlink(missing_ok=True)
 
 
 class CreateModpack(BaseModel):

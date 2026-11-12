@@ -676,6 +676,11 @@ const strings = {
 
   // bedrock edition (Geyser)
   'Bedrock Edition (Geyser)': 'Bedrock Edition (Geyser)',
+  'Eksportuj .minenodepack': 'Export .minenodepack',
+  'Eksportowanie…': 'Exporting…',
+  'Importuj .minenodepack': 'Import .minenodepack',
+  'Eksport rozpoczęty': 'Export started',
+  'Serwer zaimportowany': 'Server imported',
   'Bedrock nie jest dostępny dla tego serwera': 'Bedrock is not available for this server',
   'Zgodność Geysera': 'Geyser compatibility',
   'wymagany restart serwera': 'server restart required',

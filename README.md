@@ -100,6 +100,10 @@ MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser
 
 MineNode automatically checks the Java version supported by the current Geyser build and keeps Geyser updated from the official Downloads API. Older Paper/Purpur servers receive a managed ViaVersion plugin; Fabric servers receive ViaFabric and Fabric API. The gateway is restarted by itself after a Geyser update, while Minecraft servers are not restarted. Vanilla, Forge, NeoForge and Quilt servers are blocked when they need a translator that their loader cannot provide.
 
+### Portable server packages
+
+In **Server → Settings**, use **Export .minenodepack** to create a portable package containing the server configuration, world, installed engine, plugins/mods, resource packs, `.minenode` metadata and per-server player data. The server must be stopped before export so the world is consistent. On the dashboard, **Import .minenodepack** creates a new server with a new ID and automatically allocated internal/voice ports; the original server is not overwritten. Packages contain a versioned manifest and can be imported by later MineNode releases as long as the package schema is supported. Hostnames and aliases are checked for conflicts during import.
+
 1. Open **Server → Settings → Bedrock Edition (Geyser)** and enable *Share via Bedrock* for the servers you want. Geyser is enabled independently of the Java proxy and does not affect it.
 2. Open **TCP and UDP** port `19132` on your firewall and router. NetherNet uses TCP signalling and UDP gameplay on the same port.
 3. Players add a server in Bedrock with the same address Java players use, e.g. `survival.mc.example.com`, port `19132`. The address must resolve on the player's device; Bedrock has no SRV records.

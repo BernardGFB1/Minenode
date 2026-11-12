@@ -38,6 +38,8 @@
           <button :class="{ active: view === 'grid' }" :title="$t('Kafelki')" @click="view = 'grid'"><LayoutGrid /></button>
           <button :class="{ active: view === 'list' }" :title="$t('Lista')" @click="view = 'list'"><List /></button>
         </div>
+        <button class="btn" @click="$refs.packInput.click()"><Upload /> {{ $t('Importuj .minenodepack') }}</button>
+        <input ref="packInput" type="file" accept=".minenodepack" hidden @change="importPack" />
         <router-link to="/modpacks" class="btn"><Package /> {{ $t('Importuj modpack') }}</router-link>
         <router-link to="/new" class="btn primary"><Plus /> {{ $t('Nowy serwer') }}</router-link>
       </div>
@@ -83,7 +85,7 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Plus, Package, Cpu, MemoryStick, HardDrive, Network, Boxes, Search, LayoutGrid, List, Play, Square, TerminalSquare } from 'lucide-vue-next'
+import { Plus, Package, Upload, Cpu, MemoryStick, HardDrive, Network, Boxes, Search, LayoutGrid, List, Play, Square, TerminalSquare } from 'lucide-vue-next'
 import Meter from '../components/Meter.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import ServerAvatar from '../components/ServerAvatar.vue'
@@ -137,6 +139,18 @@ async function power(s, action) {
   try { await api.post(`/servers/${s.id}/power`, { action }); refreshFleet() } catch (e) { toastError(e) }
 }
 async function copy(text) { if (await copyText(text)) toast('Skopiowano adres', 'success', 1800) }
+async function importPack(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    await api.upload('/servers/import', form)
+    toast('Serwer zaimportowany', 'success')
+    refreshFleet()
+  } catch (e) { toastError(e) }
+}
 </script>
 <style scoped>
 .dash { min-height: 100vh; display: flex; flex-direction: column; }
