@@ -235,6 +235,7 @@ class ServerInstance:
             "internal_port": self.cfg.internal_port,
             "modpack": self.cfg.modpack.model_dump() if self.cfg.modpack else None,
             "has_icon": (self.dir / "server-icon.png").exists(),
+            "icon_version": self.icon_version(),
             "bedrock_enabled": self.cfg.bedrock_enabled,
             "exit_code": self.exit_code,
             "created_at": self.cfg.created_at,
@@ -317,6 +318,23 @@ class ServerInstance:
             logging.getLogger("minenode").exception("install failed")
             self.set_job(None)
             self.set_state("offline" if self.cfg.installed else "install_failed")
+
+    def icon_version(self) -> int:
+        """Changes whenever server-icon.png changes – lets the browser drop a cached icon."""
+        try:
+            return (self.dir / "server-icon.png").stat().st_mtime_ns // 1_000_000
+        except OSError:
+            return 0
+
+    def set_icon(self, data: bytes) -> None:
+        """Replace server-icon.png with an already validated 64×64 PNG (atomic write)."""
+        icon = self.dir / "server-icon.png"
+        tmp = icon.with_name(".server-icon.png.tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, icon)
+
+    def remove_icon(self) -> None:
+        (self.dir / "server-icon.png").unlink(missing_ok=True)
 
     def ensure_default_icon(self) -> bool:
         """Give a server without its own server-icon.png the MineNode icon (64×64 PNG).

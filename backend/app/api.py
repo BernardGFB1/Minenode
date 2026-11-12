@@ -629,6 +629,48 @@ async def server_icon(sid: str, _: str = Depends(auth.require_user)):
     return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
+ICON_MAX_BYTES = 64 * 1024  # the proxy only embeds icons up to this size for offline servers
+
+
+def validate_server_icon(data: bytes) -> None:
+    """Minecraft only shows server-icon.png when it is a PNG of exactly 64×64 pixels."""
+    if len(data) > ICON_MAX_BYTES:
+        raise HTTPException(400, "Ikona jest za duża (maks. 64 KB)")
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        raise HTTPException(400, "Ikona musi być plikiem PNG")
+    if (int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")) != (64, 64):
+        raise HTTPException(400, "Ikona musi mieć dokładnie 64×64 piksele")
+
+
+def _icon_state(inst: ServerInstance) -> dict:
+    return {"has_icon": (inst.dir / "server-icon.png").exists(), "icon_version": inst.icon_version(),
+            "restart_required": inst.running}
+
+
+@router.post("/servers/{sid}/icon")
+async def upload_server_icon(sid: str, file: UploadFile = File(...), _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    data = await file.read(ICON_MAX_BYTES + 1)
+    validate_server_icon(data)
+    await asyncio.to_thread(inst.set_icon, data)
+    return _icon_state(inst)
+
+
+@router.post("/servers/{sid}/icon/default")
+async def reset_server_icon(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    await asyncio.to_thread(inst.remove_icon)
+    await asyncio.to_thread(inst.ensure_default_icon)
+    return _icon_state(inst)
+
+
+@router.delete("/servers/{sid}/icon")
+async def delete_server_icon(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    await asyncio.to_thread(inst.remove_icon)
+    return _icon_state(inst)
+
+
 # ====================================================================== players
 
 @router.get("/servers/{sid}/players")
