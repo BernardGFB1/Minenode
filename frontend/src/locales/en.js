@@ -689,6 +689,14 @@ const strings = {
 
   // bedrock edition (Geyser)
   'Bedrock Edition (Geyser)': 'Bedrock Edition (Geyser)',
+  'Autoryzacja graczy': 'Player authentication',
+  'lobby działa': 'lobby running',
+  'lobby uruchamiane': 'lobby starting',
+  'Wymagaj logowania na serwerach offline-mode': 'Require login on offline-mode servers',
+  'Gracz bez sesji trafi do ukrytego lobby Paper, gdzie użyje /register lub /login. Serwery online-mode korzystają z autoryzacji Mojang.': 'Players without a session enter the hidden Paper lobby and use /register or /login. Online-mode servers use Mojang authentication.',
+  'Sesja trwa 30 minut od ostatniego wejścia lub wyjścia i jest przypisana do nicku oraz adresu IP.': 'Sessions last 30 minutes from the last entry or exit and are bound to the player name and IP address.',
+  'Port wewnętrzny lobby:': 'Internal lobby port:',
+  'Zapisz autoryzację': 'Save authentication',
   'Eksportuj .minenodepack': 'Export .minenodepack',
   'Eksportowanie…': 'Exporting…',
   'Importuj .minenodepack': 'Import .minenodepack',

@@ -64,6 +64,23 @@
       </section>
 
       <section class="card">
+        <div class="card-head"><LockKeyhole /><h3>{{ $t('Autoryzacja graczy') }}</h3>
+          <span v-if="s.auth_lobby?.running" class="badge green">{{ $t('lobby działa') }}</span>
+          <span v-else class="badge amber">{{ $t('lobby uruchamiane') }}</span>
+        </div>
+        <div class="card-body col" style="gap: 12px">
+          <Toggle v-model="s.player_auth_enabled" :label="$t('Wymagaj logowania na serwerach offline-mode')"
+                  :hint="$t('Gracz bez sesji trafi do ukrytego lobby Paper, gdzie użyje /register lub /login. Serwery online-mode korzystają z autoryzacji Mojang.')" />
+          <div class="callout info small"><Info /><div>
+            {{ $t('Sesja trwa 30 minut od ostatniego wejścia lub wyjścia i jest przypisana do nicku oraz adresu IP.') }}
+            <span v-if="s.auth_lobby?.port"> {{ $t('Port wewnętrzny lobby:') }} <span class="mono">{{ s.auth_lobby.port }}</span>.</span>
+          </div></div>
+          <div v-if="s.auth_lobby?.error" class="callout warn small"><Info />{{ s.auth_lobby.error }}</div>
+          <div class="row"><span class="spacer" /><button class="btn primary" :disabled="saving" @click="saveAuth"><Save /> {{ $t('Zapisz autoryzację') }}</button></div>
+        </div>
+      </section>
+
+      <section class="card">
         <div class="card-head"><MonitorSmartphone /><h3>{{ $t('Wygląd wyłączonych serwerów') }}</h3>
           <span class="small muted">{{ $t('to widzi gracz, gdy serwer nie działa') }}</span></div>
         <div class="card-body col" style="gap: 22px">
@@ -167,9 +184,10 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw } from 'lucide-vue-next'
+import { Network, Info, Save, KeyRound, LockKeyhole, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
 import BackupDestinations from '../components/BackupDestinations.vue'
+import Toggle from '../components/Toggle.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
 import { MC_FONT } from '../mc'
 import Modal from '../components/Modal.vue'
@@ -241,6 +259,13 @@ async function save() {
 }
 async function saveKey() {
   try { s.value = await api.put('/settings', { curseforge_api_key: cfKey.value }); cfKey.value = ''; toast('Zapisano klucz CurseForge', 'success') } catch (e) { toastError(e) }
+}
+async function saveAuth() {
+  saving.value = true
+  try {
+    s.value = await api.put('/settings', { player_auth_enabled: s.value.player_auth_enabled })
+    toast('Zapisano ustawienia autoryzacji', 'success')
+  } catch (e) { toastError(e) } finally { saving.value = false }
 }
 async function installJava(v) {
   javaBusy.value = v

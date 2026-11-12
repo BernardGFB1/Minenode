@@ -249,7 +249,7 @@ class MinecraftProxy:
         lobby = getattr(self.m, "auth_lobby", None)
         # Offline-mode servers use the hidden Paper lobby. Online-mode servers
         # retain Mojang's normal authentication and do not pass through it.
-        if player and not inst.online_mode:
+        if player and not inst.online_mode and getattr(self.m.settings, "player_auth_enabled", True):
             auth_ip = str(peer[0])
             from .auth_sessions import touch, valid
             if not valid(player, auth_ip):
