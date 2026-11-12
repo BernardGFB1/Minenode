@@ -1,7 +1,7 @@
 // Minecraft text helpers: § codes <-> rich HTML for the WYSIWYG MOTD editor, dirt background, obfuscation.
 import { MC_COLORS } from './utils'
 
-export const MC_FONT = "'Pixelify Sans', 'JetBrains Mono Variable', monospace"
+export const MC_FONT = "'MineNode Minecraft', 'Pixelify Sans', 'JetBrains Mono Variable', monospace"
 export const DEFAULT_COLOR = '#AAAAAA' // server-list MOTD text is gray unless coloured
 const OBF = 'mcobf'
 const HEX = Object.fromEntries(MC_COLORS.map(([c, h]) => [c, h]))

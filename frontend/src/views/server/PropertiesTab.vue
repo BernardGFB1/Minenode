@@ -29,9 +29,11 @@
                   </div>
                   <template v-else-if="f.type === 'motd'">
                     <MotdEditor :model-value="val(f)" :max-lines="2" @update:model-value="set(f.key, $event)" />
+                    <div class="section-title" style="margin: 6px 0 0">{{ $t('Ikona serwera') }}</div>
+                    <ServerIconPicker :server-id="id" :src="iconUrl" :has-icon="live.summary.has_icon" @updated="iconUpdated" />
                     <div class="section-title" style="margin: 6px 0 0">{{ $t('Podgląd na liście serwerów') }}</div>
-                    <ServerListEntry :name="live.summary.name" :motd="val(f)" :icon="live.summary.has_icon ? `/api/servers/${live.summary.id}/icon` : null"
-                                     :players="`${live.summary.players_online}/${edits['max-players'] ?? cur['max-players'] ?? 20}`" />
+                    <ServerListEntry :name="live.summary.name" :motd="val(f)" :icon="iconUrl"
+                                     :players="`${live.summary.players_online ?? 0}/${edits['max-players'] || cur['max-players'] || 20}`" />
                   </template>
                   <input v-else class="input" :class="{ mono: f.mono }" :type="f.type === 'number' ? 'number' : 'text'" :min="f.min" :max="f.max"
                          :placeholder="f.placeholder ? $t(f.placeholder) : ''" :value="val(f)" @input="set(f.key, $event.target.value)" />
@@ -81,6 +83,8 @@ import { Sparkles, Globe2, ShieldCheck, Gauge, Image, Braces, Plus, Save, Info, 
 import Toggle from '../../components/Toggle.vue'
 import MotdEditor from '../../components/MotdEditor.vue'
 import ServerListEntry from '../../components/ServerListEntry.vue'
+import ServerIconPicker from '../../components/ServerIconPicker.vue'
+import { refreshFleet } from '../../servers'
 import { GROUPS } from '../../data/properties'
 import { api } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
@@ -98,6 +102,12 @@ const newKey = ref('')
 const newVal = ref('')
 
 const dirty = computed(() => Object.keys(edits.value).length > 0)
+const iconUrl = computed(() => (live.summary.has_icon ? `/api/servers/${id}/icon?v=${live.summary.icon_version || 0}` : null))
+function iconUpdated(r) {
+  live.summary.has_icon = r.has_icon
+  live.summary.icon_version = r.icon_version
+  refreshFleet() // sidebar and dashboard avatars
+}
 const val = (f) => edits.value[f.key] ?? cur.value[f.key] ?? f.default
 const visible = (f) => !exists.value || f.key in cur.value || ['motd', 'max-players', 'difficulty', 'gamemode', 'pvp', 'online-mode', 'white-list', 'level-seed', 'view-distance'].includes(f.key)
 const set = (k, v) => { edits.value = { ...edits.value, [k]: String(v) } }
