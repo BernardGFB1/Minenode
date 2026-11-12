@@ -690,6 +690,9 @@ const strings = {
   // bedrock edition (Geyser)
   'Bedrock Edition (Geyser)': 'Bedrock Edition (Geyser)',
   'Autoryzacja graczy': 'Player authentication',
+  'Wymagaj logowania na tym serwerze': 'Require login on this server',
+  'Gracze bez sesji trafią do ukrytego lobby i użyją /register lub /login. Dotyczy tylko tego serwera offline-mode.': 'Players without a session enter the hidden lobby and use /register or /login. This applies only to this offline-mode server.',
+  'Autoryzację włącza się osobno w ustawieniach każdego serwera. Lobby jest wspólne dla całego panelu.': 'Authentication is enabled separately in each server settings. The lobby is shared by the panel.',
   'lobby działa': 'lobby running',
   'lobby uruchamiane': 'lobby starting',
   'Wymagaj logowania na serwerach offline-mode': 'Require login on offline-mode servers',

@@ -82,6 +82,7 @@ class ServerConfig(BaseModel):
     voice_enabled: bool = False  # Simple Voice Chat routed through the shared UDP proxy
     voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
+    auth_enabled: bool = True  # routed through the hidden MineNodeAuth lobby when offline-mode
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None
@@ -131,8 +132,6 @@ class PanelSettings(BaseModel):
     # Bedrock (Geyser NetherNet): addresses sent to players for the game connection, comma-separated, optional
     # ":port". Empty = public_address / a server hostname, else STUN (unreliable behind NAT that remaps ports).
     bedrock_advertise: str = ""
-    # MineNodeAuth: offline-mode servers use the hidden Paper lobby before routing.
-    player_auth_enabled: bool = True
     # What the proxy shows for servers that are not running. Placeholders:
     # {name} {motd} {address} {mc_version} {join_hint}
     motd_offline: str = "§f{name}\n§7● Serwer jest wyłączony{join_hint}"

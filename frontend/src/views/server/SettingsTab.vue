@@ -49,6 +49,15 @@
       </div>
     </section>
 
+    <section class="card">
+      <div class="card-head"><LockKeyhole class="hi" /><h3>{{ $t('Autoryzacja graczy') }}</h3></div>
+      <div class="card-body col" style="gap: 12px">
+        <Toggle v-model="c.auth_enabled" :label="$t('Wymagaj logowania na tym serwerze')"
+                :hint="$t('Gracze bez sesji trafią do ukrytego lobby i użyją /register lub /login. Dotyczy tylko tego serwera offline-mode.')" />
+        <div class="callout info small"><LockKeyhole />{{ $t('Sesja trwa 30 minut od ostatniego wejścia lub wyjścia i jest przypisana do nicku oraz adresu IP.') }}</div>
+      </div>
+    </section>
+
     <div class="row" style="justify-content: flex-end"><button class="btn primary" :disabled="saving" @click="save"><Save /> {{ $t('Zapisz ustawienia') }}</button></div>
 
     <VoiceChatCard :server-id="id" />
@@ -83,7 +92,7 @@
 <script setup>
 import { inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Tag, RefreshCcw, Network, Save, Wrench, Download, AlertOctagon, AlertTriangle, Trash2 } from 'lucide-vue-next'
+import { Tag, RefreshCcw, Network, LockKeyhole, Save, Wrench, Download, AlertOctagon, AlertTriangle, Trash2 } from 'lucide-vue-next'
 import Toggle from '../../components/Toggle.vue'
 import VersionPicker from '../../components/VersionPicker.vue'
 import VoiceChatCard from '../../components/VoiceChatCard.vue'
@@ -121,6 +130,7 @@ async function save() {
       auto_start: c.value.auto_start, auto_restart: c.value.auto_restart, start_on_join: c.value.start_on_join,
       proxy_protocol: c.value.proxy_protocol, restart_daily_at: c.value.restart_daily_at || null,
       idle_shutdown_minutes: c.value.idle_shutdown_minutes || 0,
+      auth_enabled: c.value.auth_enabled,
     }
     const r = await api.patch(`/servers/${id}/config`, body)
     c.value = r.config

@@ -217,7 +217,7 @@ async def get_settings(_: str = Depends(auth.require_user)):
     d["bedrock_port"] = BEDROCK_PORT
     lobby = getattr(manager, "auth_lobby", None)
     d["auth_lobby"] = {
-        "enabled": s.player_auth_enabled,
+        "enabled": True,
         "running": bool(lobby and lobby.running),
         "error": lobby.error if lobby else None,
         "port": getattr(lobby, "port", None),
@@ -238,7 +238,6 @@ class SettingsBody(BaseModel):
     public_panel_url: Optional[str] = None
     pack_subdomain: Optional[str] = Field(default=None, max_length=63)
     bedrock_advertise: Optional[str] = Field(default=None, max_length=300)
-    player_auth_enabled: Optional[bool] = None
     motd_offline: Optional[str] = Field(default=None, max_length=300)
     motd_starting: Optional[str] = Field(default=None, max_length=300)
     version_offline: Optional[str] = Field(default=None, max_length=80)
@@ -268,8 +267,6 @@ async def put_settings(body: SettingsBody, _: str = Depends(auth.require_user)):
             if not re.match(r"^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?$", p):
                 raise HTTPException(400, f"Niepoprawny adres Bedrock: {p}")
         s.bedrock_advertise = ", ".join(parts)
-    if body.player_auth_enabled is not None:
-        s.player_auth_enabled = body.player_auth_enabled
     for key in TEXT_SETTINGS:
         val = getattr(body, key)
         if val is not None:
@@ -493,6 +490,7 @@ class ConfigPatch(BaseModel):
     idle_shutdown_minutes: Optional[int] = Field(default=None, ge=0, le=24 * 60)
     java: Optional[JavaConfig] = None
     backup: Optional[BackupSchedule] = None
+    auth_enabled: Optional[bool] = None
 
 
 @router.patch("/servers/{sid}/config")
