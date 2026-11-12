@@ -85,6 +85,14 @@ def _find(inst: "ServerInstance", kind: str) -> Path | None:
 def _base(inst: "ServerInstance", geyser_java: str | None = None) -> dict:
     geyser_java = geyser_java or GEYSER_JAVA_FALLBACK
     mc = getattr(inst.cfg, "mc_version", GEYSER_JAVA_FALLBACK)
+    # MineNode's shared Geyser gateway must use offline authentication.  This
+    # avoids mixing the Java server's online-mode session verification with
+    # Bedrock/Xbox authentication and makes the requirement explicit instead
+    # of silently changing server.properties behind the user's back.
+    if getattr(inst, "online_mode", False):
+        return {"state": "unsupported", "supported": False,
+                "reason": "Najpierw wyłącz online-mode w server.properties (ustaw online-mode=false), "
+                          "a następnie włącz Bedrock/Geyser."}
     if mc in ("", "?"):
         return {"state": "unsupported", "supported": False, "reason": "Nieznana wersja Minecrafta."}
     if version_key(mc) >= version_key(geyser_java):

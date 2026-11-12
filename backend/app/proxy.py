@@ -183,7 +183,8 @@ class MinecraftProxy:
         except (asyncio.TimeoutError, asyncio.IncompleteReadError, ProtocolError, ConnectionError):
             await self._close(writer)
         except _Piped as piped:
-            await self._pipe(reader, writer, piped.r, piped.w, piped.inst, piped.player)
+            await self._pipe(reader, writer, piped.r, piped.w, piped.inst, piped.player,
+                             piped.track, piped.auth_name, piped.auth_ip)
         except _Http as req:
             await self._serve_http(writer, req.method, req.path)
         except Exception:
@@ -243,12 +244,34 @@ class MinecraftProxy:
             await self._reply_offline(reader, writer, next_state, "unknown", None, hostname)
             return
 
+        target = inst
+        auth_name, auth_ip = None, None
+        lobby = getattr(self.m, "auth_lobby", None)
+        # Offline-mode servers use the hidden Paper lobby. Online-mode servers
+        # retain Mojang's normal authentication and do not pass through it.
+        if player and not inst.online_mode:
+            auth_ip = str(peer[0])
+            from .auth_sessions import touch, valid
+            if not valid(player, auth_ip):
+                if not lobby or not lobby.running:
+                    await self._reply_offline(reader, writer, next_state, "auth", inst, hostname)
+                    return
+                from .auth_sessions import set_pending
+                set_pending(player, auth_ip)
+                target = lobby
+                auth_name = player
+            else:
+                # Session lifetime is 30 minutes from the last connection
+                # activity; entering the target server refreshes it.
+                touch(player, auth_ip)
+                auth_name = player
+
         if player and self._not_whitelisted(inst, player):
             inst.record_attempt(player, None, "proxy")
-        if player and inst is not None:
+        if player and inst is not None and target is inst:
             inst.bind_voice(player, player_uuid if next_state in (2, 3) else None)
 
-        if inst.state != "online":
+        if target is inst and inst.state != "online":
             if next_state in (2, 3) and inst.request_start():
                 mode = "waking"
             elif inst.state in ("starting", "installing"):
@@ -259,17 +282,18 @@ class MinecraftProxy:
             return
 
         try:
-            up_r, up_w = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", inst.cfg.internal_port), 5)
+            port = target.port if target is lobby else target.cfg.internal_port
+            up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
         except (OSError, asyncio.TimeoutError):
             await self._reply_offline(reader, writer, next_state, "starting", inst, hostname)
             return
-        if inst.cfg.proxy_protocol:
+        if target is inst and inst.cfg.proxy_protocol:
             local = writer.get_extra_info("sockname") or ("0.0.0.0", self.port)
             up_w.write(proxy_v2_header(peer, local))
         up_w.write(buffered)
         await up_w.drain()
-        raise _Piped(up_r, up_w, inst, player if next_state in (2, 3) else None)
+        raise _Piped(up_r, up_w, inst, player if next_state in (2, 3) else None,
+                     track=target is not lobby, auth_name=auth_name, auth_ip=auth_ip)
 
     @staticmethod
     def _not_whitelisted(inst: "ServerInstance", player: str) -> bool:
@@ -334,7 +358,8 @@ class MinecraftProxy:
                         writer.write(packet(1, body[pos:pos + 8]))
                         await writer.drain()
             else:
-                template = {"waking": s.kick_waking, "starting": s.kick_starting}.get(
+                template = {"waking": s.kick_waking, "starting": s.kick_starting,
+                            "auth": "§eTen serwer wymaga logowania. Połącz się ponownie, aby się zarejestrować lub zalogować."}.get(
                     mode, s.kick_offline if inst else "§cNieznany serwer: {name}")
                 msg = {"text": self.render(template, inst, hostname)}
                 writer.write(packet(0, mc_string(json.dumps(msg, ensure_ascii=False))))
@@ -381,13 +406,15 @@ class MinecraftProxy:
         finally:
             await self._close(writer)
 
-    async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance", player: str | None = None) -> None:
-        sid = inst.cfg.id
+    async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance", player: str | None = None,
+                    track: bool = True, auth_name: str | None = None, auth_ip: str | None = None) -> None:
+        sid = inst.cfg.id if track else "auth-lobby"
         self.active += 1
-        self.per_server[sid] = self.per_server.get(sid, 0) + 1
+        if track:
+            self.per_server[sid] = self.per_server.get(sid, 0) + 1
         sock = c_w.get_extra_info("socket")
         key = player.lower() if player else None
-        if key and sock is not None:
+        if track and key and sock is not None:
             self.sessions.setdefault(sid, {})[key] = sock
 
         async def copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, up: bool) -> None:
@@ -420,12 +447,17 @@ class MinecraftProxy:
                 t.cancel()
         finally:
             self.active -= 1
-            self.per_server[sid] = max(0, self.per_server.get(sid, 1) - 1)
-            live = self.sessions.get(sid, {})
-            if key and live.get(key) is sock:  # a reconnect may already have replaced this entry
-                del live[key]
-                if not live:
-                    self.sessions.pop(sid, None)
+            if track:
+                self.per_server[sid] = max(0, self.per_server.get(sid, 1) - 1)
+                live = self.sessions.get(sid, {})
+                if key and live.get(key) is sock:  # a reconnect may already have replaced this entry
+                    del live[key]
+                    if not live:
+                        self.sessions.pop(sid, None)
+            if auth_name and auth_ip:
+                lobby_obj = getattr(self.m, "auth_lobby", None)
+                if lobby_obj:
+                    lobby_obj.touch(auth_name, auth_ip)
             await self._close(c_w)
             await self._close(s_w)
 
@@ -445,9 +477,10 @@ class _Http(Exception):
 class _Piped(Exception):
     """Control-flow signal: the handshake was routed, start piping outside of the timeout scope."""
 
-    def __init__(self, r, w, inst, player=None):
+    def __init__(self, r, w, inst, player=None, track=True, auth_name=None, auth_ip=None):
         super().__init__()
         self.r, self.w, self.inst, self.player = r, w, inst, player
+        self.track, self.auth_name, self.auth_ip = track, auth_name, auth_ip
 
 
 def tcp_rtt_ms(sock) -> int | None:

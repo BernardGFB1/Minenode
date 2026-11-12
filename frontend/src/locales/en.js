@@ -682,6 +682,7 @@ const strings = {
   'Eksport rozpoczęty': 'Export started',
   'Serwer zaimportowany': 'Server imported',
   'Bedrock nie jest dostępny dla tego serwera': 'Bedrock is not available for this server',
+  'Najpierw wyłącz online-mode w server.properties (ustaw online-mode=false), a następnie włącz Bedrock/Geyser.': 'First disable online-mode in server.properties (set online-mode=false), then enable Bedrock/Geyser.',
   'Zgodność Geysera': 'Geyser compatibility',
   'wymagany restart serwera': 'server restart required',
   'gotowe': 'ready',

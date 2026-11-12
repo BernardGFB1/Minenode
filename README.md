@@ -100,6 +100,12 @@ MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser
 
 MineNode automatically checks the Java version supported by the current Geyser build and keeps Geyser updated from the official Downloads API. Older Paper/Purpur servers receive a managed ViaVersion plugin; Fabric servers receive ViaFabric and Fabric API. The gateway is restarted by itself after a Geyser update, while Minecraft servers are not restarted. Vanilla, Forge, NeoForge and Quilt servers are blocked when they need a translator that their loader cannot provide.
 
+### Player authentication for offline servers
+
+MineNode runs one hidden, lightweight Paper authentication lobby (`MineNodeAuth`, up to 512 MB RAM). Players connecting to an offline-mode server without a valid session are sent to the lobby, where they can use `/register <hasło> <powtórz_hasło>` or `/login <hasło>`. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
+
+Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials and sessions are stored under `auth/`.
+
 ### Portable server packages
 
 In **Server → Settings**, use **Export .minenodepack** to create a portable package containing the server configuration, world, installed engine, plugins/mods, resource packs, `.minenode` metadata and per-server player data. The server must be stopped before export so the world is consistent. On the dashboard, **Import .minenodepack** creates a new server with a new ID and automatically allocated internal/voice ports; the original server is not overwritten. Packages contain a versioned manifest and can be imported by later MineNode releases as long as the package schema is supported. Hostnames and aliases are checked for conflicts during import.

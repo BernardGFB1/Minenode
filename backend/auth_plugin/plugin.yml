@@ -1,0 +1,12 @@
+name: MineNodeAuth
+version: 1.0.0
+main: pl.minenode.auth.MineNodeAuth
+api-version: '1.20'
+author: MineNode
+commands:
+  login:
+    description: Log in to MineNode
+    usage: /login <password>
+  register:
+    description: Register a MineNode account
+    usage: /register <password> <password>

@@ -22,6 +22,7 @@ JAVA_DIR = DATA_DIR / "java"
 CACHE_DIR = DATA_DIR / "cache"
 PANEL_DIR = DATA_DIR / "panel"
 TMP_DIR = DATA_DIR / "tmp"
+AUTH_LOBBY_DIR = DATA_DIR / "auth-lobby"
 
 PANEL_HOST = os.environ.get("MINENODE_HOST", "0.0.0.0")
 PANEL_PORT = _env_int("MINENODE_PORT", 8080)
@@ -31,6 +32,7 @@ INTERNAL_PORT_START = _env_int("MINENODE_INTERNAL_PORT_START", 25600)
 VOICE_HOST = os.environ.get("MINENODE_VOICE_HOST", PROXY_HOST)
 VOICE_PORT = _env_int("MINENODE_VOICE_PORT", 24454)  # shared public UDP port for Simple Voice Chat
 INTERNAL_VOICE_PORT_START = _env_int("MINENODE_INTERNAL_VOICE_PORT_START", 24500)
+AUTH_LOBBY_PORT = _env_int("MINENODE_AUTH_LOBBY_PORT", 25999)
 BEDROCK_HOST = os.environ.get("MINENODE_BEDROCK_HOST", PROXY_HOST)
 BEDROCK_PORT = _env_int("MINENODE_BEDROCK_PORT", 19132)  # shared public port (TCP signaling + UDP gameplay) for Geyser
 BEDROCK_SAVED_LOGINS = tuple(
@@ -49,5 +51,5 @@ USER_AGENT = f"minenode-panel/{VERSION} (self-hosted Minecraft server manager)"
 
 
 def ensure_dirs() -> None:
-    for d in (DATA_DIR, SERVERS_DIR, BACKUPS_DIR, JAVA_DIR, CACHE_DIR, PANEL_DIR, TMP_DIR):
+    for d in (DATA_DIR, SERVERS_DIR, BACKUPS_DIR, JAVA_DIR, CACHE_DIR, PANEL_DIR, TMP_DIR, AUTH_LOBBY_DIR):
         d.mkdir(parents=True, exist_ok=True)

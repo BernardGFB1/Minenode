@@ -5,6 +5,8 @@
         <h1>{{ $t('Nowy serwer') }}</h1>
         <div class="sub">{{ $t('Panel pobierze pliki serwera i odpowiednią wersję Javy automatycznie.') }}</div>
       </div>
+      <button class="btn" :disabled="busy" @click="$refs.packInput.click()"><Upload /> {{ $t('Importuj .minenodepack') }}</button>
+      <input ref="packInput" type="file" accept=".minenodepack" hidden @change="importPack" />
       <router-link to="/modpacks" class="btn"><Package /> {{ $t('Zamiast tego: modpack') }}</router-link>
     </div>
 
@@ -86,7 +88,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Package, CheckCircle2, Coffee, Loader2, Rocket } from 'lucide-vue-next'
+import { Package, Upload, CheckCircle2, Coffee, Loader2, Rocket } from 'lucide-vue-next'
 import VersionPicker from '../components/VersionPicker.vue'
 import RamPicker from '../components/RamPicker.vue'
 import EngineIcon from '../components/EngineIcon.vue'
@@ -126,6 +128,24 @@ async function create() {
   try {
     const s = await api.post('/servers', { ...form, subdomain: form.subdomain || null })
     toast(t('Instalowanie serwera „{name}”…', { name: s.name }), 'success')
+    refreshFleet()
+    router.push(`/servers/${s.id}/console`)
+  } catch (e) {
+    toastError(e)
+  } finally {
+    busy.value = false
+  }
+}
+async function importPack(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  busy.value = true
+  try {
+    const s = await api.upload('/servers/import', formData)
+    toast(t('Serwer zaimportowany'), 'success')
     refreshFleet()
     router.push(`/servers/${s.id}/console`)
   } catch (e) {

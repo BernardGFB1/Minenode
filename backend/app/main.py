@@ -16,6 +16,7 @@ ensure_dirs()
 
 from . import api, auth, net  # noqa: E402  (data dirs must exist first)
 from .backups import BackupManager  # noqa: E402
+from .auth_lobby import AuthLobby  # noqa: E402
 from .bedrock import BedrockProxy  # noqa: E402
 from .manager import Manager  # noqa: E402
 from .proxy import MinecraftProxy  # noqa: E402
@@ -32,8 +33,10 @@ async def lifespan(app: FastAPI):
     manager.backups = BackupManager(manager)
     manager.proxy = MinecraftProxy(manager, PROXY_HOST, PROXY_PORT)
     manager.voice = VoiceProxy(manager, VOICE_HOST, VOICE_PORT)
+    manager.auth_lobby = AuthLobby(manager)
     manager.bedrock = BedrockProxy(manager, BEDROCK_HOST, BEDROCK_PORT)
     api.manager = manager
+    await manager.auth_lobby.start()
     await manager.proxy.start()
     await manager.voice.start()
     await manager.startup()
@@ -44,6 +47,7 @@ async def lifespan(app: FastAPI):
     finally:
         log.info("Shutting down – stopping servers gracefully…")
         await manager.bedrock.close()
+        await manager.auth_lobby.stop()
         await manager.shutdown()
         await manager.proxy.stop()
         await manager.voice.stop()

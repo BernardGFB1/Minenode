@@ -685,6 +685,7 @@ class Manager:
         self.proxy = None
         self.voice = None
         self.bedrock = None
+        self.auth_lobby = None
         for sid, raw in self.servers_store.data.items():
             try:
                 cfg = ServerConfig.model_validate(raw)
