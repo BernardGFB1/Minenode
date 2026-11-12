@@ -33,6 +33,7 @@ WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY backend/app ./app
+COPY backend/auth_plugin/MineNodeAuth.jar ./auth_plugin/MineNodeAuth.jar
 COPY backend/bedrock_ext/MineNodeRouter.jar ./bedrock_ext/MineNodeRouter.jar
 COPY --from=web /web/dist ./static
 COPY docker/entrypoint.sh /entrypoint.sh
