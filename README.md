@@ -102,7 +102,7 @@ MineNode automatically checks the Java version supported by the current Geyser b
 
 ### Player authentication for offline servers
 
-MineNode runs one hidden, lightweight Paper authentication lobby (`MineNodeAuth`, up to 512 MB RAM). Players connecting to an offline-mode server without a valid session are sent to the lobby, where they can use `/register <hasło> <powtórz_hasło>` or `/login <hasło>`. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
+MineNode runs one hidden, lightweight Paper authentication lobby (`MineNodeAuth`, up to 384 MB heap; configurable with `MINENODE_AUTH_LOBBY_RAM_MB`, clamped to 256–384 MB). The lobby automatically installs ViaVersion, ViaBackwards and ViaRewind, allowing legacy 1.8.x clients and newer clients supported by ViaVersion to connect. Players connecting to an offline-mode server without a valid session are sent to the lobby, where they can use `/register <hasło> <powtórz_hasło>` or `/login <hasło>`. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
 
 Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials and sessions are stored under `auth/`.
 

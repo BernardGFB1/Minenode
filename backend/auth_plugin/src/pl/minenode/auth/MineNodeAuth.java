@@ -1,6 +1,9 @@
 package pl.minenode.auth;
 
 import org.bukkit.ChatColor;
+import org.bukkit.GameMode;
+import org.bukkit.World;
+import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -38,11 +41,24 @@ public final class MineNodeAuth extends JavaPlugin implements Listener {
         try { Files.createDirectories(file.getParent()); if (!Files.exists(file)) Files.createFile(file); }
         catch (IOException e) { getLogger().severe("Nie można otworzyć bazy MineNodeAuth: " + e); }
         getServer().getPluginManager().registerEvents(this, this);
+        World world = Bukkit.getWorld("auth");
+        if (world != null) {
+            world.setDifficulty(org.bukkit.Difficulty.PEACEFUL);
+            world.setTime(6000);
+            world.setGameRuleValue("doDaylightCycle", "false");
+            world.setGameRuleValue("doWeatherCycle", "false");
+            world.setGameRuleValue("doMobSpawning", "false");
+            world.setGameRuleValue("randomTickSpeed", "0");
+        }
     }
 
     @EventHandler public void join(PlayerJoinEvent event) {
         event.setJoinMessage(null);
         Player p = event.getPlayer();
+        p.setGameMode(GameMode.SPECTATOR);
+        p.getInventory().clear();
+        World world = Bukkit.getWorld("auth");
+        if (world != null) p.teleport(world.getSpawnLocation());
         p.sendMessage(ChatColor.YELLOW + "MineNode: zaloguj się przez /login <hasło> lub zarejestruj przez /register <hasło> <hasło>");
     }
 
