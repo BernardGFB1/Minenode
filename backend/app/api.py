@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from . import storage as storage_mod
+from . import bedrock_compat
 from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
@@ -1503,9 +1504,11 @@ def _bedrock_state(inst: ServerInstance) -> dict:
     if display:
         address = display if BEDROCK_PORT == 19132 else f"{display}:{BEDROCK_PORT}"
     stats = bp.stats() if bp else {}
+    compat = bedrock_compat.quick_state(inst, stats.get("java_version"))
     return {
         "enabled": inst.cfg.bedrock_enabled,
-        "supported": True,
+        "supported": compat.get("supported", False),
+        "compat": compat,
         "public_host": host,
         "public_port": BEDROCK_PORT,
         "address": address,
@@ -1536,6 +1539,15 @@ class BedrockBody(BaseModel):
 @run_errors
 async def bedrock_set(sid: str, body: BedrockBody, _: str = Depends(auth.require_user)):
     inst = inst_or_404(sid)
+    if body.enabled:
+        bp = manager.bedrock
+        geyser_java = bp.geyser_java_version if bp else None
+        compat = bedrock_compat.quick_state(inst, geyser_java)
+        if not compat.get("supported"):
+            raise ValueError(compat.get("reason", "Serwer nie jest zgodny z Geyserem."))
+        # Installation happens before persistence, so a failed download never
+        # leaves a server enabled with a route that cannot work.
+        await bedrock_compat.ensure(inst, geyser_java)
     inst.cfg.bedrock_enabled = body.enabled
     manager.save_server(inst.cfg)
     if manager.bedrock:

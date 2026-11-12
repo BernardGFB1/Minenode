@@ -19,11 +19,13 @@ import os
 import re
 import shutil
 import time
+import zipfile
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import net
+from . import bedrock_compat
 from .config import BEDROCK_HOST, BEDROCK_PORT, BEDROCK_SAVED_LOGINS, DATA_DIR, PROXY_PORT, TMP_DIR
 from .java import ensure_java
 from .models import HOSTNAME_RE
@@ -34,6 +36,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("minenode.bedrock")
 
 DOWNLOAD_API = "https://download.geysermc.org/v2/projects"
+GEYSER_META = f"{DOWNLOAD_API}/geyser/versions/latest/builds/latest"
 BEDROCK_DIR = DATA_DIR / "bedrock"
 GEYSER_JAR = BEDROCK_DIR / "geyser-standalone.jar"
 CONFIG = BEDROCK_DIR / "config.yml"
@@ -152,6 +155,9 @@ class BedrockProxy:
         self._route_snapshot: dict[str, "ServerInstance"] = {}
         self._conflicts: list[str] = []
         self._running_config: str | None = None  # config.yml text Geyser was started with
+        self.geyser_java_version = bedrock_compat.GEYSER_JAVA_FALLBACK
+        self._geyser_check_at = 0.0
+        self._geyser_changed = False
 
     # ------------------------------------------------------------ state
     def enabled(self) -> bool:
@@ -166,7 +172,7 @@ class BedrockProxy:
         requirement for Bedrock players.
         """
         for inst in self.m.instances.values():
-            if inst.cfg.bedrock_enabled and inst.online_mode:
+            if inst.cfg.bedrock_enabled and self._bedrock_ready(inst) and inst.online_mode:
                 return "online"
         return "offline"
 
@@ -183,6 +189,7 @@ class BedrockProxy:
             "listening": self.listening,
             "error": self.error,
             "version": self.geyser_version,
+            "java_version": self.geyser_java_version,
             "router_version": ROUTER_VERSION,
             "auth": self._running_auth or self.auth_mode(),
             "servers": [i.cfg.id for i in self.m.instances.values() if i.cfg.bedrock_enabled],
@@ -251,7 +258,17 @@ class BedrockProxy:
             elif existing is not inst:
                 conflicts.append(f"{host}: {existing.cfg.name} / {inst.cfg.name}")
         self._conflicts = conflicts
-        return {host: inst for host, inst in owners.items() if inst.cfg.bedrock_enabled}
+        return {host: inst for host, inst in owners.items()
+                if inst.cfg.bedrock_enabled and self._bedrock_ready(inst)}
+
+    def _bedrock_ready(self, inst: "ServerInstance") -> bool:
+        # Lightweight test doubles and old configurations may not have the
+        # newer fields yet.  Real ServerConfig objects always do.
+        if not hasattr(inst.cfg, "mc_version"):
+            return True
+        state = bedrock_compat.quick_state(inst, self.geyser_java_version)
+        return state.get("supported", False) and not state.get("restart_required", False) and (
+            state.get("addon_ready", False) or state.get("state") == "native")
 
     def advertise_addresses(self) -> tuple[list[str], str]:
         """Addresses Geyser sends to Bedrock players for the NetherNet (WebRTC) game connection.
@@ -298,7 +315,7 @@ class BedrockProxy:
             lines.append(f"deny.{index}={host}")
         # Anything else (LAN IP, unknown name) goes to the default server – like the Java proxy – if it has Bedrock.
         default = self._default_server()
-        if default is not None and default.cfg.bedrock_enabled:
+        if default is not None and default.cfg.bedrock_enabled and self._bedrock_ready(default):
             auth = "online" if default.online_mode else "offline"
             lines.append(f"fallback={default.cfg.id}|{auth}|127.0.0.1|{PROXY_PORT}")
         return "\n".join(lines) + "\n", routes
@@ -374,8 +391,10 @@ class BedrockProxy:
 
     async def _ensure_files(self) -> None:
         BEDROCK_DIR.mkdir(parents=True, exist_ok=True)
-        if not GEYSER_JAR.exists():
-            await self._download("geyser", "standalone", GEYSER_JAR)
+        if GEYSER_JAR.exists():
+            self._read_geyser_java_version()
+        await self._update_geyser()
+        self._read_geyser_java_version()
         if not self._router_synced:
             if not BUNDLED_ROUTER_JAR.is_file():
                 raise RuntimeError(
@@ -388,6 +407,62 @@ class BedrockProxy:
                 shutil.copyfile(BUNDLED_ROUTER_JAR, tmp)
                 os.replace(tmp, ROUTER_JAR)
             self._router_synced = True
+
+    def _read_geyser_java_version(self) -> None:
+        """Read the public codec version from Geyser without depending on internals."""
+        try:
+            with zipfile.ZipFile(GEYSER_JAR) as zf:
+                raw = zf.read("org/geysermc/mcprotocollib/protocol/codec/MinecraftCodec.class")
+                if self.geyser_version in ("", "installed"):
+                    try:
+                        props = zf.read("git.properties").decode("utf-8", "replace")
+                        match = re.search(r"^git\.build\.version=(.+)$", props, re.MULTILINE)
+                        build = re.search(r"^git\.build\.number=(.+)$", props, re.MULTILINE)
+                        if match:
+                            self.geyser_version = match.group(1).strip()
+                            if build:
+                                self.geyser_version += f"-b{build.group(1).strip()}"
+                    except KeyError:
+                        pass
+            # MinecraftCodec stores the version as a normal CONSTANT_Utf8.
+            versions = re.findall(rb"(?:1\.[0-9]+(?:\.[0-9]+)?|(?:2[0-9])\.[0-9]+)", raw)
+            if versions:
+                self.geyser_java_version = max((v.decode() for v in versions), key=bedrock_compat.version_key)
+        except (OSError, KeyError, zipfile.BadZipFile):
+            log.warning("Could not read Geyser supported Java version; using %s", self.geyser_java_version)
+
+    async def _update_geyser(self) -> None:
+        """Install the newest promoted Geyser build and atomically replace old JARs."""
+        now = time.monotonic()
+        if GEYSER_JAR.exists() and now - self._geyser_check_at < 3600:
+            return
+        self._geyser_check_at = now
+        if not GEYSER_JAR.exists():
+            # Keep the original download path for first installation and for
+            # deployments/tests that provide a mocked Geyser downloader.
+            await self._download("geyser", "standalone", GEYSER_JAR)
+            self._geyser_changed = True
+            return
+        # A version learned from the JAR metadata is needed to compare builds.
+        # If this is not a valid Geyser archive, leave it untouched and let the
+        # normal process start report the actual problem.
+        if not self.geyser_version:
+            return
+        meta = await net.get_json(GEYSER_META)
+        item = meta.get("downloads", {}).get("standalone")
+        if not item:
+            raise RuntimeError("Geyser download 'standalone' is not available")
+        wanted = f"{meta['version']}-b{meta['build']}"
+        if GEYSER_JAR.exists() and self.geyser_version == wanted:
+            return
+        url = f"{DOWNLOAD_API}/geyser/versions/{meta['version']}/builds/{meta['build']}/downloads/standalone"
+        tmp = TMP_DIR / "geyser-standalone.jar.download"
+        await net.download(url, tmp, sha256=item.get("sha256"))
+        os.replace(tmp, GEYSER_JAR)
+        self.geyser_version = wanted
+        self._geyser_changed = True
+        self._append_log(f"Pobrano Geyser {wanted}")
+        log.info("Installed Geyser %s", wanted)
 
     async def _download(self, project: str, name: str, destination: Path) -> None:
         meta = await net.get_json(f"{DOWNLOAD_API}/{project}/versions/latest/builds/latest")
@@ -450,6 +525,14 @@ class BedrockProxy:
                 return
 
             await self._ensure_files()
+            if self.running and self._geyser_changed:
+                # The JAR cannot be replaced safely while the process is
+                # using it.  Restart only the gateway, never Java servers.
+                await self._stop_process()
+                self._geyser_changed = False
+            for inst in self.m.instances.values():
+                if inst.cfg.bedrock_enabled and hasattr(inst.cfg, "mc_version"):
+                    await bedrock_compat.ensure(inst, self.geyser_java_version)
             self._write_routes()
 
             desired_auth = self.auth_mode()
@@ -471,6 +554,7 @@ class BedrockProxy:
             await self._start_process(desired_auth)
             if self.running:
                 self._running_config = desired_config
+                self._geyser_changed = False
 
     async def _start_process(self, auth_mode: str) -> None:
         try:

@@ -676,6 +676,10 @@ const strings = {
 
   // bedrock edition (Geyser)
   'Bedrock Edition (Geyser)': 'Bedrock Edition (Geyser)',
+  'Bedrock nie jest dostępny dla tego serwera': 'Bedrock is not available for this server',
+  'Zgodność Geysera': 'Geyser compatibility',
+  'wymagany restart serwera': 'server restart required',
+  'gotowe': 'ready',
   'Udostępnij przez Bedrock': 'Expose through Bedrock',
   'Gracze z Minecraft Bedrock Edition wejdą na ten serwer przez wspólny port Geysera. Proxy Java działa bez zmian.': 'Minecraft Bedrock Edition players will reach this server through the shared Geyser port. The Java proxy stays unchanged.',
   'Port': 'Port',

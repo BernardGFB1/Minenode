@@ -9,11 +9,25 @@
     </div>
     <div v-if="!v" class="card-body"><Loader2 class="spin" style="width: 16px" /></div>
     <div v-else class="card-body col" style="gap: 14px">
-      <Toggle :model-value="v.enabled" :disabled="busy" :label="$t('Udostępnij przez Bedrock')"
+      <Toggle :model-value="v.enabled" :disabled="busy || (!v.enabled && !v.supported)" :label="$t('Udostępnij przez Bedrock')"
               :hint="$t('Gracze z Minecraft Bedrock Edition wejdą na ten serwer przez wspólny port Geysera. Proxy Java działa bez zmian.')"
               @update:model-value="toggle" />
 
-      <template v-if="v.enabled">
+       <div v-if="!v.supported" class="callout warn small">
+         <AlertTriangle />
+         <div><b>{{ $t('Bedrock nie jest dostępny dla tego serwera') }}</b><br>{{ v.compat?.reason }}</div>
+       </div>
+
+       <div v-if="v.supported && v.compat?.state !== 'native'" class="callout small">
+         <div>
+           <b>{{ $t('Zgodność Geysera') }}</b>: {{ v.compat?.server_version }} ← {{ v.compat?.geyser_java_version }}
+           <span v-if="v.compat?.addon_version"> · {{ v.compat.addon }} {{ v.compat.addon_version }}</span>
+           <span v-if="v.compat?.restart_required" class="pending"> · {{ $t('wymagany restart serwera') }}</span>
+           <span v-else-if="v.compat?.addon_ready" class="ok"> · {{ $t('gotowe') }}</span>
+         </div>
+       </div>
+
+       <template v-if="v.enabled">
         <dl class="info">
           <dt>{{ $t('Adres dla graczy') }}</dt><dd class="mono">{{ v.address || '—' }}</dd>
           <dt>{{ $t('Port') }}</dt><dd class="mono">{{ v.public_port }} TCP + UDP</dd>

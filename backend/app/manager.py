@@ -364,6 +364,23 @@ class ServerInstance:
             eula = self.dir / "eula.txt"
             if not eula.exists() or "eula=true" not in eula.read_text(errors="ignore").replace(" ", "").lower():
                 raise ServerError("Nie zaakceptowano EULA Minecrafta (eula.txt)")
+            if self.cfg.bedrock_enabled:
+                from . import bedrock_compat
+                try:
+                    compat = await bedrock_compat.ensure(
+                        self, getattr(self.m.bedrock, "geyser_java_version", None))
+                    if not compat.get("supported"):
+                        self.cfg.bedrock_enabled = False
+                        self.m.save_server(self.cfg)
+                        if self.m.bedrock:
+                            self.m.bedrock.request_apply()
+                        self.panel_log(f"Bedrock wyłączony: {compat.get('reason', 'brak zgodności')}")
+                except Exception as exc:  # Bedrock must not prevent Java startup
+                    self.cfg.bedrock_enabled = False
+                    self.m.save_server(self.cfg)
+                    if self.m.bedrock:
+                        self.m.bedrock.request_apply()
+                    self.panel_log(f"Bedrock wyłączony – nie udało się przygotować zgodności: {exc}")
             self.set_state("starting")
             try:
                 self._enforce_properties()
