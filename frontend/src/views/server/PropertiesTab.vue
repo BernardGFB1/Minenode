@@ -33,7 +33,7 @@
                     <ServerIconPicker :server-id="id" :src="iconUrl" :has-icon="live.summary.has_icon" @updated="iconUpdated" />
                     <div class="section-title" style="margin: 6px 0 0">{{ $t('Podgląd na liście serwerów') }}</div>
                     <ServerListEntry :name="live.summary.name" :motd="val(f)" :icon="iconUrl"
-                                     :players="`${live.summary.players_online}/${edits['max-players'] ?? cur['max-players'] ?? 20}`" />
+                                     :players="`${live.summary.players_online ?? 0}/${edits['max-players'] || cur['max-players'] || 20}`" />
                   </template>
                   <input v-else class="input" :class="{ mono: f.mono }" :type="f.type === 'number' ? 'number' : 'text'" :min="f.min" :max="f.max"
                          :placeholder="f.placeholder ? $t(f.placeholder) : ''" :value="val(f)" @input="set(f.key, $event.target.value)" />

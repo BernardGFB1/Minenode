@@ -1,0 +1,17 @@
+/* "Minecraft" by Idrees Hassan – a fan rendition of the in-game UI font (SIL OFL 1.1, see
+   assets/fonts/minecraft/OFL.txt). Not affiliated with Mojang. Covers U+0000–U+00FF; other
+   characters (e.g. Polish letters) fall back to the next font in MC_FONT. */
+@font-face {
+  font-family: 'MineNode Minecraft';
+  src: url('../assets/fonts/minecraft/Minecraft.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'MineNode Minecraft';
+  src: url('../assets/fonts/minecraft/Minecraft-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
