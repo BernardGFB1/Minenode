@@ -15,19 +15,19 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import psutil
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, WebSocket
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.websockets import WebSocketDisconnect
 
 from . import storage as storage_mod
-from . import bedrock_compat, packs
+from . import bedrock_compat, packs, worldgen
 from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
-from .models import BackupSchedule, JavaConfig, ModpackInfo, PanelSettings, ServerConfig, SERVER_TYPES
+from .models import BackupSchedule, JavaConfig, ModpackInfo, PanelSettings, ServerConfig, ServerType, SERVER_TYPES
 from .properties import MANAGED_KEYS, read_properties, update_properties
 
 router = APIRouter(prefix="/api")
@@ -53,7 +53,7 @@ def run_errors(fn):
     async def wrapper(*a, **kw):
         try:
             return await fn(*a, **kw)
-        except (ServerError, modpacks.ModpackError, packs.PackError, ValueError) as exc:
+        except (ServerError, modpacks.ModpackError, packs.PackError, worldgen.WorldgenError, ValueError) as exc:
             raise HTTPException(400, str(exc))
         except ValidationError as exc:
             raise HTTPException(422, "; ".join(e["msg"] for e in exc.errors()))
@@ -339,14 +339,22 @@ async def list_servers(_: str = Depends(auth.require_user)):
     return sorted((i.summary() for i in manager.instances.values()), key=lambda s: s["created_at"])
 
 
+class WorldgenSpec(BaseModel):
+    level_type: str = Field(default="", max_length=100)  # normal / flat / large_biomes / amplified / namespaced id
+    seed: str = Field(default="", max_length=100)
+    generator: str = Field(default="", max_length=100)  # bukkit.yml worlds.<level>.generator (plugins)
+    files: list[str] = Field(default_factory=list, max_length=worldgen.MAX_FILES)  # tokens from /worldgen/stage
+
+
 class CreateServer(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    type: Literal["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge"]
+    type: ServerType
     mc_version: str
     loader_version: Optional[str] = None
     subdomain: Optional[str] = None
     java: JavaConfig = JavaConfig()
     eula: bool = False
+    worldgen: Optional[WorldgenSpec] = None
 
 
 def _unique_subdomain(wanted: str | None, name: str) -> str:
@@ -365,11 +373,57 @@ def _unique_subdomain(wanted: str | None, name: str) -> str:
 async def create_server(body: CreateServer, _: str = Depends(auth.require_user)):
     if not body.eula:
         raise HTTPException(400, "Musisz zaakceptować EULA Minecrafta")
+    spec = body.worldgen.model_dump() if body.worldgen else None
+    # Checked before anything is created: a bad generator file must not leave a half-made server behind.
+    files = worldgen.validate(spec, body.type, body.mc_version) if spec else []
     inst = manager.create(name=body.name, type=body.type, mc_version=body.mc_version,
                           loader_version=body.loader_version or None,
                           subdomain=_unique_subdomain(body.subdomain, body.name), java=body.java.model_dump())
+    if spec:
+        await asyncio.to_thread(worldgen.apply, inst, spec, files, inst.panel_log)
     await inst.install(eula=True)
     return inst.summary()
+
+
+@router.get("/worldgen/modrinth")
+@run_errors
+async def worldgen_search(engine: str, mc: str = "", q: str = Query("", max_length=100), offset: int = 0,
+                          _: str = Depends(auth.require_user)):
+    if engine not in SERVER_TYPES:
+        raise HTTPException(404, "Nieznany silnik")
+    return await worldgen.modrinth_search(engine, mc or None, q, offset)
+
+
+class WorldgenModrinthBody(BaseModel):
+    project_id: str = Field(max_length=20)
+    engine: ServerType
+    mc_version: str = Field(max_length=40)
+
+
+@router.post("/worldgen/modrinth")
+@run_errors
+async def worldgen_from_modrinth(body: WorldgenModrinthBody, _: str = Depends(auth.require_user)):
+    """Download a world generator from Modrinth for a server that is being created."""
+    return await worldgen.stage_from_modrinth(body.project_id, body.engine, body.mc_version)
+
+
+@router.post("/worldgen/stage")
+@run_errors
+async def worldgen_stage(file: UploadFile = File(...), _: str = Depends(auth.require_user)):
+    """Upload one world generator file (datapack, plugin or mod) for a server that is being created."""
+    worldgen.STAGE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = worldgen.STAGE_DIR / f"upload-{uuid.uuid4().hex}.part"
+    try:
+        with open(tmp, "wb") as fh:
+            size = 0
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > worldgen.MAX_FILE:
+                    raise HTTPException(400, "Plik jest za duży (maks. 512 MB)")
+                fh.write(chunk)
+        return await asyncio.to_thread(worldgen.stage, tmp, file.filename or "")
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @router.get("/servers/{sid}/export")
@@ -491,6 +545,7 @@ class ConfigPatch(BaseModel):
     java: Optional[JavaConfig] = None
     backup: Optional[BackupSchedule] = None
     auth_enabled: Optional[bool] = None
+    custom_jar: Optional[str] = Field(default=None, max_length=255)  # "Custom JAR" servers: file to start
 
 
 @router.patch("/servers/{sid}/config")
@@ -501,6 +556,13 @@ async def patch_config(sid: str, body: ConfigPatch, _: str = Depends(auth.requir
     patch = body.model_dump(exclude_unset=True)
     if "restart_daily_at" in patch and not patch["restart_daily_at"]:
         patch["restart_daily_at"] = None
+    if "custom_jar" in patch:
+        jar = patch.pop("custom_jar") or ""
+        if inst.cfg.type != "custom":
+            raise HTTPException(400, "Plik .jar wybiera się tylko dla silnika Custom JAR")
+        if jar and jar not in inst.custom_jars():
+            raise HTTPException(400, f"Nie ma pliku {jar} w głównym folderze serwera")
+        data["launch"] = {"kind": "jar", "target": jar}
     data.update(patch)
     new = ServerConfig.model_validate(data)
     if new.java.min_ram_mb > new.java.max_ram_mb:
@@ -552,7 +614,7 @@ async def command(sid: str, body: CommandBody, _: str = Depends(auth.require_use
 
 
 class ReinstallBody(BaseModel):
-    type: Optional[Literal["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge"]] = None
+    type: Optional[ServerType] = None
     mc_version: Optional[str] = None
     loader_version: Optional[str] = None
 

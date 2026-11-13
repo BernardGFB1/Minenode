@@ -5,7 +5,7 @@
         <input v-model="filter" class="input" :placeholder="$t('Szukaj wersji, np. 1.21')" />
         <span class="addon">{{ $t('{n} wersji', { n: filtered.length }) }}</span>
       </div>
-      <Toggle v-if="engine === 'vanilla' || engine === 'fabric' || engine === 'quilt'" v-model="snapshots" :label="$t('Snapshoty')" />
+      <Toggle v-if="['vanilla', 'custom', 'fabric', 'quilt'].includes(engine)" v-model="snapshots" :label="$t('Snapshoty')" />
     </div>
     <div class="versions" :class="{ loading }">
       <div v-if="loading" class="empty small"><Loader2 class="spin" />{{ $t('Pobieranie listy wersji…') }}</div>
@@ -16,7 +16,7 @@
         </button>
       </template>
     </div>
-    <div v-if="engine !== 'vanilla' && mc" class="field">
+    <div v-if="!NO_LOADER.includes(engine) && mc" class="field">
       <label>{{ loaderLabel }}</label>
       <select class="select" :value="loader || ''" @change="$emit('update:loader', $event.target.value || null)">
         <option value="">{{ $t('Najnowsza stabilna (zalecane)') }}</option>
@@ -32,6 +32,7 @@ import Toggle from './Toggle.vue'
 import { api } from '../api'
 import { t } from '../i18n'
 const props = defineProps({ engine: String, mc: String, loader: String })
+const NO_LOADER = ['vanilla', 'custom'] // engines without a loader/build choice
 const emit = defineEmits(['update:mc', 'update:loader'])
 const versions = ref([])
 const loaders = ref([])
@@ -59,7 +60,7 @@ async function load() {
 }
 async function loadLoaders() {
   loaders.value = []
-  if (!props.mc || props.engine === 'vanilla') return
+  if (!props.mc || NO_LOADER.includes(props.engine)) return
   try { loaders.value = await api.get(`/versions/${props.engine}/${props.mc}/loaders`) } catch {}
 }
 watch(() => [props.engine, snapshots.value], load, { immediate: true })

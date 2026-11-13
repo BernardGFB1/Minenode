@@ -36,6 +36,8 @@ ENGINES = {
     "quilt": {"name": "Quilt", "desc": "Fork Fabrica, kompatybilny z większością jego modów.", "mods": True, "plugins": False},
     "forge": {"name": "Forge", "desc": "Klasyczny loader dla dużych paczek modów.", "mods": True, "plugins": False},
     "neoforge": {"name": "NeoForge", "desc": "Rozwijany następca Forge'a (1.20.1+).", "mods": True, "plugins": False},
+    "custom": {"name": "Custom JAR", "desc": "Własny plik .jar silnika – panel niczego nie pobiera, wgrywasz go w zakładce Pliki.",
+               "mods": False, "plugins": False, "custom": True},
 }
 
 _cache: dict[str, tuple[float, object]] = {}
@@ -94,7 +96,7 @@ async def required_java(mc: str) -> int:
 # ---------------------------------------------------------------- Version discovery
 
 async def game_versions(engine: str, snapshots: bool = False) -> list[dict]:
-    if engine == "vanilla":
+    if engine in ("vanilla", "custom"):  # for a custom JAR the version only picks the Java runtime
         m = await mojang_manifest()
         return [
             {"id": v["id"], "stable": v["type"] == "release", "date": v.get("releaseTime")}
@@ -122,7 +124,7 @@ async def game_versions(engine: str, snapshots: bool = False) -> list[dict]:
 
 
 async def loader_versions(engine: str, mc: str) -> list[dict]:
-    if engine == "vanilla":
+    if engine in ("vanilla", "custom"):
         return []
     if engine == "paper":
         builds = await _paper_builds(mc)
@@ -150,7 +152,7 @@ async def loader_versions(engine: str, mc: str) -> list[dict]:
 
 
 async def default_loader(engine: str, mc: str) -> str | None:
-    if engine == "vanilla":
+    if engine in ("vanilla", "custom"):
         return None
     if engine == "forge":
         promos = await _forge_promos()
@@ -302,9 +304,20 @@ async def install(engine: str, ctx: InstallContext) -> tuple[LaunchSpec, str | N
     fn = {
         "vanilla": _install_vanilla, "paper": _install_paper, "purpur": _install_purpur,
         "fabric": _install_fabric, "quilt": _install_quilt, "forge": _install_forge, "neoforge": _install_neoforge,
+        "custom": _install_custom,
     }[engine]
     launch = await fn(ctx, loader)
     return launch, loader
+
+
+async def _install_custom(ctx: InstallContext, _loader) -> LaunchSpec:
+    """Nothing to download: the user uploads their own server JAR. The file is picked at start."""
+    jars = sorted(p.name for p in ctx.server_dir.glob("*.jar") if p.is_file())
+    if jars:
+        ctx.log(f"Pliki .jar w folderze serwera: {', '.join(jars)}")
+    else:
+        ctx.log("Wgraj plik .jar silnika do głównego folderu serwera (zakładka Pliki) i uruchom serwer.")
+    return LaunchSpec(kind="jar", target="")  # empty: detected from the folder on every start
 
 
 async def _install_vanilla(ctx: InstallContext, _loader) -> LaunchSpec:

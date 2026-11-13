@@ -5,8 +5,10 @@
 A self-hosted panel for running Minecraft servers. It ships as a single Docker container and gives you:
 
 - **7 engines**: Vanilla, Paper, Purpur, Fabric, Quilt, Forge and NeoForge. Versions and builds come live from the official APIs.
+- **Custom JAR**: run any other server software (e.g. a hybrid or your own build). MineNode downloads nothing: upload the `.jar` in the Files tab and it is found on start, whatever its name (pick one in *Java & startup* when there are several). The Minecraft version you choose only selects the Java runtime.
 - **Automatic Java**: MineNode reads the required Java version from Mojang's metadata and downloads Eclipse Temurin (8/11/17/21/25) through the Adoptium API.
 - **A built-in Minecraft reverse proxy**: every server runs behind one port (`25565`), and players land on the right one by subdomain (`survival.mc.example.com`, `creative.mc.example.com`, …).
+- **Custom world generation at creation**: pick the world type (flat, large biomes, amplified or a datapack/mod world preset), a seed, and add world generator datapacks, plugins (Terra, Iris…) or mods – uploaded or picked from Modrinth's world generation category, with required dependencies downloaded automatically. MineNode recognises each file, checks it fits the engine and puts it in place before the first start (`world/datapacks/`, `plugins/` + `bukkit.yml` generator, `mods/`), so the world is generated with it from the start.
 - **Modpack import** from Modrinth (`.mrpack`) and CurseForge (manifest or official server pack), including uploaded files.
 - **One-click mods and plugins**: search Modrinth and CurseForge filtered to the server's engine and Minecraft version. Required dependencies are installed automatically.
 - **Compatibility checks**: every file in `mods/` or `plugins/` is identified on Modrinth by SHA-1 and checked against the game version and loader. MineNode suggests updates (including "Update all") and prints warnings about incompatible files in the console on every start.

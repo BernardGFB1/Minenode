@@ -1,6 +1,24 @@
 <template>
   <div v-if="info && j" class="grid" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start">
     <div class="col" style="gap: 16px">
+      <section v-if="custom" class="card">
+        <div class="card-head"><FileCode2 class="hi" /><h3>{{ $t('Plik silnika (.jar)') }}</h3></div>
+        <div class="card-body col" style="gap: 10px">
+          <div v-if="!custom.jars.length" class="callout warn small"><AlertTriangle />
+            <div>{{ $t('W głównym folderze serwera nie ma pliku .jar. Wgraj swój silnik w zakładce Pliki – panel sam go znajdzie.') }}
+              <router-link :to="`/servers/${id}/files`">{{ $t('Pliki') }}</router-link></div>
+          </div>
+          <template v-else>
+            <select class="select mono" :value="custom.chosen" :disabled="savingJar" @change="pickJar($event.target.value)">
+              <option v-if="custom.jars.length === 1" value="">{{ $t('Automatycznie ({jar})', { jar: custom.jars[0] }) }}</option>
+              <option v-else value="" disabled>{{ $t('Wybierz plik…') }}</option>
+              <option v-for="f in custom.jars" :key="f" :value="f">{{ f }}</option>
+            </select>
+            <span class="tiny muted">{{ custom.jars.length > 1 && !custom.picked ? $t('W folderze jest kilka plików .jar – wskaż, który uruchomić.') : $t('Serwer startuje z: {jar}', { jar: custom.active || '—' }) }}</span>
+          </template>
+        </div>
+      </section>
+
       <section class="card">
         <div class="card-head"><Coffee class="hi" /><h3>{{ $t('Środowisko Java') }}</h3></div>
         <div class="card-body col" style="gap: 14px">
@@ -76,7 +94,7 @@
 </template>
 <script setup>
 import { computed, inject, onMounted, ref } from 'vue'
-import { Coffee, MemoryStick, Zap, Terminal, SquareTerminal, Copy, Save, AlertTriangle, Loader2 } from 'lucide-vue-next'
+import { Coffee, MemoryStick, Zap, Terminal, SquareTerminal, Copy, Save, AlertTriangle, Loader2, FileCode2 } from 'lucide-vue-next'
 import RamPicker from '../../components/RamPicker.vue'
 import { api } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
@@ -87,6 +105,16 @@ const id = live.summary.id
 const info = ref(null)
 const j = ref(null)
 const saving = ref(false)
+const custom = ref(null)
+const savingJar = ref(false)
+async function pickJar(jar) {
+  savingJar.value = true
+  try {
+    await api.patch(`/servers/${id}/config`, { custom_jar: jar })
+    await load()
+    toast(live.summary.state === 'online' ? 'Zapisano – nowy plik zostanie użyty po restarcie' : 'Zapisano plik silnika', 'success', 2500)
+  } catch (e) { toastError(e) } finally { savingJar.value = false }
+}
 const presets = [
   { id: 'aikar', name: "Flagi Aikara (G1GC)", badge: 'zalecane', badgeColor: 'green', desc: 'Sprawdzony zestaw strojenia G1 dla serwerów Minecraft – krótkie pauzy GC, automatycznie skalowany dla >12 GB.' },
   { id: 'zgc', name: 'Generational ZGC', badge: 'Java 17+', badgeColor: 'blue', desc: 'Pauzy poniżej milisekundy. Dobre dla dużych stert (16 GB+), wymaga trochę więcej RAM.' },
@@ -101,6 +129,9 @@ async function load() {
     info.value = await api.get(`/servers/${id}/startup`)
     const d = await api.get(`/servers/${id}`)
     j.value = { ...d.config.java }
+    custom.value = d.type === 'custom'
+      ? { jars: d.custom_jars || [], active: d.custom_jar, chosen: d.config.launch?.target || '', picked: !!d.config.launch?.target && (d.custom_jars || []).includes(d.config.launch.target) }
+      : null
     original.value = JSON.stringify(j.value)
   } catch (e) { toastError(e) }
 }

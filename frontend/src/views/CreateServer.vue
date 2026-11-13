@@ -21,6 +21,7 @@
                 <div class="row" style="gap: 6px"><b>{{ e.name }}</b>
                   <span v-if="e.plugins" class="badge blue">{{ $t('Pluginy') }}</span>
                   <span v-if="e.mods" class="badge amber">{{ $t('Mody') }}</span>
+                  <span v-if="e.custom" class="badge">{{ $t('Własny plik') }}</span>
                 </div>
                 <div class="small muted">{{ $t(e.desc) }}</div>
               </div>
@@ -63,6 +64,13 @@
             </label>
           </div>
         </section>
+
+        <section class="card">
+          <div class="card-head"><span class="step">4</span><h3>{{ $t('Świat') }}</h3><span class="badge">{{ $t('opcjonalnie') }}</span></div>
+          <div class="card-body">
+            <WorldgenPicker ref="worldPicker" v-model="world" :engine="form.type" :mc="form.mc_version" />
+          </div>
+        </section>
       </div>
 
       <aside class="summary card">
@@ -71,11 +79,13 @@
           <dl>
             <dt>{{ $t('Silnik') }}</dt><dd>{{ engines[form.type]?.name }}</dd>
             <dt>{{ $t('Wersja') }}</dt><dd class="mono">{{ form.mc_version || '—' }}</dd>
-            <dt v-if="form.type !== 'vanilla'">{{ $t('Loader/build') }}</dt><dd v-if="form.type !== 'vanilla'" class="mono">{{ form.loader_version || $t('najnowszy') }}</dd>
+            <dt v-if="!['vanilla', 'custom'].includes(form.type)">{{ $t('Loader/build') }}</dt><dd v-if="!['vanilla', 'custom'].includes(form.type)" class="mono">{{ form.loader_version || $t('najnowszy') }}</dd>
             <dt>RAM</dt><dd>{{ formatMB(form.java.max_ram_mb) }}</dd>
+            <dt>{{ $t('Świat') }}</dt><dd>{{ worldSummary }}</dd>
             <dt>{{ $t('Adres') }}</dt><dd class="mono ellipsis">{{ address }}</dd>
           </dl>
           <div class="callout info small"><Coffee />{{ $t('Java zostanie dobrana automatycznie do wersji {v}.', { v: form.mc_version || $t('gry') }) }}</div>
+          <div v-if="form.type === 'custom'" class="callout info small"><FileCode2 />{{ $t('Panel nie pobierze żadnego silnika. Po utworzeniu wgraj swój plik .jar w zakładce Pliki – panel sam go znajdzie przy starcie.') }}</div>
           <button class="btn primary" style="height: 40px" :disabled="!valid || busy" @click="create">
             <Loader2 v-if="busy" class="spin" /><Rocket v-else /> {{ $t('Utwórz i zainstaluj') }}
           </button>
@@ -92,6 +102,7 @@ import { Package, Upload, CheckCircle2, Coffee, Loader2, Rocket } from 'lucide-v
 import VersionPicker from '../components/VersionPicker.vue'
 import RamPicker from '../components/RamPicker.vue'
 import EngineIcon from '../components/EngineIcon.vue'
+import WorldgenPicker from '../components/WorldgenPicker.vue'
 import { api } from '../api'
 import { toast, toastError } from '../store'
 import { t } from '../i18n'
@@ -115,7 +126,15 @@ const address = computed(() => {
   return `${sub}.${settings.value?.base_domain || settings.value?.public_address || t('twoja-domena')}${port}`
 })
 const otherBytes = computed(() => fleet.servers.reduce((a, s) => a + s.max_ram_mb * 1048576, 0))
-const valid = computed(() => form.name.trim() && form.mc_version && form.eula)
+const world = ref({ preset: '', custom: '', seed: '', generator: '', files: [] })
+const worldPicker = ref(null)
+const PRESET_LABEL = { '': 'Domyślny', flat: 'Płaski', large_biomes: 'Duże biomy', amplified: 'Wzmocniony', custom: 'Własny' }
+const worldSummary = computed(() => {
+  const n = world.value.files.filter((f) => f.token).length
+  const base = world.value.preset === 'custom' ? world.value.custom || t('Własny') : t(PRESET_LABEL[world.value.preset])
+  return n ? t('{base} + pliki: {n}', { base, n }) : base
+})
+const valid = computed(() => form.name.trim() && form.mc_version && form.eula && !worldPicker.value?.blocking)
 
 onMounted(async () => {
   try {
@@ -126,7 +145,7 @@ onMounted(async () => {
 async function create() {
   busy.value = true
   try {
-    const s = await api.post('/servers', { ...form, subdomain: form.subdomain || null })
+    const s = await api.post('/servers', { ...form, subdomain: form.subdomain || null, worldgen: worldPicker.value?.spec() || null })
     toast(t('Instalowanie serwera „{name}”…', { name: s.name }), 'success')
     refreshFleet()
     router.push(`/servers/${s.id}/console`)

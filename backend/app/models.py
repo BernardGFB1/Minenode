@@ -7,8 +7,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-SERVER_TYPES = ("vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge")
-ServerType = Literal["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge"]
+SERVER_TYPES = ("vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge", "custom")
+ServerType = Literal["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge", "custom"]
 FlagsPreset = Literal["aikar", "zgc", "none"]
 
 SUBDOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")

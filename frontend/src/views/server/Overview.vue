@@ -1,5 +1,10 @@
 <template>
   <div class="col" style="gap: 16px">
+    <div v-if="s.type === 'custom' && s.installed && !s.custom_jar" class="callout warn small">
+      <FileCode2 />
+      <div>{{ s.custom_jars?.length > 1 ? $t('W folderze serwera jest kilka plików .jar – wybierz silnik w zakładce Java.') : $t('Wgraj plik .jar silnika do głównego folderu serwera – panel sam go znajdzie przy starcie.') }}
+        <router-link :to="`/servers/${s.id}/${s.custom_jars?.length > 1 ? 'java' : 'files'}`">{{ s.custom_jars?.length > 1 ? $t('Java') : $t('Pliki') }}</router-link></div>
+    </div>
     <div class="grid grid-4">
       <div class="card tile">
         <div class="tl"><Timer /> {{ $t('Czas działania') }}</div>
@@ -71,7 +76,7 @@
 </template>
 <script setup>
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
-import { Timer, Users, Cpu, MemoryStick, ArrowRight } from 'lucide-vue-next'
+import { Timer, Users, Cpu, MemoryStick, ArrowRight, FileCode2 } from 'lucide-vue-next'
 import AreaChart from '../../components/AreaChart.vue'
 import Meter from '../../components/Meter.vue'
 import { api } from '../../api'

@@ -1,6 +1,12 @@
 <template>
   <div class="col" style="gap: 16px">
-    <div v-if="kind === null" class="card empty-card">
+    <div v-if="kind === null && engine === 'custom'" class="card empty-card">
+      <Puzzle class="big" />
+      <h2>{{ $t('Panel nie zarządza modami własnego silnika') }}</h2>
+      <p class="muted">{{ $t('Nie wiadomo, jakie mody lub pluginy obsługuje Twój plik .jar. Wgraj je ręcznie do folderu mods/ lub plugins/ w zakładce') }}
+        <router-link :to="`/servers/${id}/files`">{{ $t('Pliki') }}</router-link>.</p>
+    </div>
+    <div v-else-if="kind === null" class="card empty-card">
       <Puzzle class="big" />
       <h2>{{ $t('Vanilla nie obsługuje modów ani pluginów') }}</h2>
       <p class="muted">{{ $t('Zmień silnik na Paper/Purpur (pluginy) albo Fabric, Quilt, Forge lub NeoForge (mody) w') }}

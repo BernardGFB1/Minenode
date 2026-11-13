@@ -66,6 +66,7 @@ export const ENGINE_META = {
   quilt: { name: 'Quilt', color: '#c45ebf', letter: 'Q' },
   forge: { name: 'Forge', color: '#d98b4b', letter: 'Fo' },
   neoforge: { name: 'NeoForge', color: '#e3a65b', letter: 'N', ink: '#3b2612' },
+  custom: { name: 'Custom JAR', color: '#8b939c', letter: 'J', ink: '#14181c' },
 }
 
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))

@@ -29,6 +29,7 @@ LOADER_COMPAT: dict[str, list[str]] = {
     "forge": ["forge"],
     "neoforge": ["neoforge"],
     "vanilla": [],
+    "custom": [],
 }
 LOADER_TAGS = {"fabric", "forge", "neoforge", "quilt", "paper", "spigot", "bukkit", "purpur", "folia", "velocity",
                "bungeecord", "waterfall", "sponge", "liteloader", "modloader", "rift", "minecraft", "datapack", "iris",

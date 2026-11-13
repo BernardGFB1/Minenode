@@ -111,6 +111,7 @@ def _base(inst: "ServerInstance", geyser_java: str | None = None) -> dict:
         "forge": "Brak wspieranego serwerowego ViaVersion dla Forge.",
         "neoforge": "Brak wspieranego serwerowego ViaVersion dla NeoForge.",
         "quilt": "ViaFabric nie ma oficjalnego wsparcia dla Quilt.",
+        "custom": "Do własnego JAR-a panel nie doinstaluje translatora – Bedrock działa, gdy wersja serwera zgadza się z Geyserem.",
     }
     return {"state": "unsupported", "supported": False,
             "reason": reasons.get(inst.cfg.type, "Ten silnik nie obsługuje translatora ViaVersion.")}

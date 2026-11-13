@@ -23,6 +23,10 @@
       <path :d="ANVIL" /><rect x="6" y="6.5" width="7" height="3.5" rx="1" />
       <path d="M19 2.5l.8 2.2 2.2.8-2.2.8L19 8.5l-.8-2.2-2.2-.8 2.2-.8z" />
     </template>
+    <template v-else-if="engine === 'custom'">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" />
+      <path d="M10 12.5l-2 2 2 2M14 12.5l2 2-2 2" />
+    </template>
     <template v-else>
       <!-- vanilla (and any unknown engine): a grass block -->
       <path d="M12 3l8 4.5-8 4.5-8-4.5z" /><path d="M4 7.5v9l8 4.5 8-4.5v-9" /><path d="M12 12v9" />

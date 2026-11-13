@@ -235,6 +235,7 @@ class ServerInstance:
             "internal_port": self.cfg.internal_port,
             "modpack": self.cfg.modpack.model_dump() if self.cfg.modpack else None,
             "has_icon": (self.dir / "server-icon.png").exists(),
+            **(self._custom_summary() if self.cfg.type == "custom" else {}),
             "icon_version": self.icon_version(),
             "bedrock_enabled": self.cfg.bedrock_enabled,
             "exit_code": self.exit_code,
@@ -354,8 +355,11 @@ class ServerInstance:
         path = self.dir / "server.properties"
         changes: dict[str, Any] = {"server-port": self.cfg.internal_port}
         props = read_properties(path)
-        if initial and not props:
-            changes.update({"motd": f"{self.cfg.name}", "enable-status": "true"})
+        if initial:  # a world generator chosen at creation may already have written a few keys
+            if "motd" not in props:
+                changes["motd"] = f"{self.cfg.name}"
+            if "enable-status" not in props:
+                changes["enable-status"] = "true"
         if props.get("server-ip"):
             changes["server-ip"] = ""
         if props.get("query.port") == "25565" or (initial and "query.port" not in props):
@@ -364,6 +368,32 @@ class ServerInstance:
         if self.cfg.voice_enabled:
             from . import voice
             voice.write_config(self, VOICE_PORT)
+
+    def _custom_summary(self) -> dict:
+        try:
+            jar = self.custom_jar()
+        except ServerError:
+            jar = None
+        return {"custom_jar": jar, "custom_jars": self.custom_jars()}
+
+    def custom_jars(self) -> list[str]:
+        """Server JARs a "Custom JAR" server can start: *.jar files in the server's root folder."""
+        try:
+            return sorted(p.name for p in self.dir.glob("*.jar") if p.is_file())
+        except OSError:
+            return []
+
+    def custom_jar(self) -> str:
+        """The JAR to start: the one picked in the panel, or the only JAR in the folder."""
+        jars = self.custom_jars()
+        chosen = self.cfg.launch.target if self.cfg.launch else ""
+        if chosen in jars:
+            return chosen
+        if len(jars) == 1:
+            return jars[0]
+        if not jars:
+            raise ServerError("Wgraj plik .jar silnika do głównego folderu serwera (zakładka Pliki)")
+        raise ServerError(f"W folderze serwera jest kilka plików .jar ({', '.join(jars)}) – wybierz silnik w zakładce Java")
 
     # ------------------------------------------------------------ lifecycle
     def build_command(self, java: Path | str, java_feature: int | None) -> list[str]:
@@ -379,7 +409,9 @@ class ServerInstance:
             extra_server = shlex.split(j.extra_server_args)
         except ValueError as exc:
             raise ServerError(f"Błędne dodatkowe argumenty: {exc}") from exc
-        if self.cfg.launch.kind == "jar":
+        if self.cfg.type == "custom":
+            cmd += ["-jar", self.custom_jar()]
+        elif self.cfg.launch.kind == "jar":
             cmd += ["-jar", self.cfg.launch.target]
         else:
             cmd.append(f"@{self.cfg.launch.target}")
