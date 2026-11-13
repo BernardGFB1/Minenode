@@ -66,7 +66,14 @@
         </section>
 
         <section class="card">
-          <div class="card-head"><span class="step">4</span><h3>{{ $t('Świat') }}</h3><span class="badge">{{ $t('opcjonalnie') }}</span></div>
+          <div class="card-head"><span class="step">4</span><h3>{{ $t('Gracze i rozgrywka') }}</h3></div>
+          <div class="card-body">
+            <CreateSettings v-model="opts" :engine="form.type" :mc="form.mc_version" />
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span class="step">5</span><h3>{{ $t('Świat') }}</h3><span class="badge">{{ $t('opcjonalnie') }}</span></div>
           <div class="card-body">
             <WorldgenPicker ref="worldPicker" v-model="world" :engine="form.type" :mc="form.mc_version" />
           </div>
@@ -81,6 +88,8 @@
             <dt>{{ $t('Wersja') }}</dt><dd class="mono">{{ form.mc_version || '—' }}</dd>
             <dt v-if="!['vanilla', 'custom'].includes(form.type)">{{ $t('Loader/build') }}</dt><dd v-if="!['vanilla', 'custom'].includes(form.type)" class="mono">{{ form.loader_version || $t('najnowszy') }}</dd>
             <dt>RAM</dt><dd>{{ formatMB(form.java.max_ram_mb) }}</dd>
+            <dt>{{ $t('Gracze') }}</dt><dd>{{ $t('{n} · {mode}', { n: opts.max_players, mode: $t(opts.online_mode ? 'premium' : opts.auth_enabled ? 'z logowaniem' : 'bez weryfikacji') }) }}</dd>
+            <dt v-if="opts.bedrock">Bedrock</dt><dd v-if="opts.bedrock">{{ $t('tak') }}</dd>
             <dt>{{ $t('Świat') }}</dt><dd>{{ worldSummary }}</dd>
             <dt>{{ $t('Adres') }}</dt><dd class="mono ellipsis">{{ address }}</dd>
           </dl>
@@ -103,6 +112,7 @@ import VersionPicker from '../components/VersionPicker.vue'
 import RamPicker from '../components/RamPicker.vue'
 import EngineIcon from '../components/EngineIcon.vue'
 import WorldgenPicker from '../components/WorldgenPicker.vue'
+import CreateSettings from '../components/CreateSettings.vue'
 import { api } from '../api'
 import { toast, toastError } from '../store'
 import { t } from '../i18n'
@@ -126,6 +136,12 @@ const address = computed(() => {
   return `${sub}.${settings.value?.base_domain || settings.value?.public_address || t('twoja-domena')}${port}`
 })
 const otherBytes = computed(() => fleet.servers.reduce((a, s) => a + s.max_ram_mb * 1048576, 0))
+// Same defaults a server gets without the wizard.
+const opts = ref({
+  online_mode: true, max_players: 20, whitelist: false, auth_enabled: true, bedrock: false,
+  gamemode: 'survival', difficulty: 'easy', hardcore: false, pvp: true, allow_flight: false, view_distance: 10,
+  start_on_join: false, idle_shutdown_minutes: 0,
+})
 const world = ref({ preset: '', custom: '', seed: '', generator: '', files: [] })
 const worldPicker = ref(null)
 const PRESET_LABEL = { '': 'Domyślny', flat: 'Płaski', large_biomes: 'Duże biomy', amplified: 'Wzmocniony', custom: 'Własny' }
@@ -134,7 +150,8 @@ const worldSummary = computed(() => {
   const base = world.value.preset === 'custom' ? world.value.custom || t('Własny') : t(PRESET_LABEL[world.value.preset])
   return n ? t('{base} + pliki: {n}', { base, n }) : base
 })
-const valid = computed(() => form.name.trim() && form.mc_version && form.eula && !worldPicker.value?.blocking)
+const valid = computed(() => form.name.trim() && form.mc_version && form.eula && !worldPicker.value?.blocking
+  && opts.value.max_players >= 1 && opts.value.max_players <= 1000)
 
 onMounted(async () => {
   try {
@@ -145,7 +162,7 @@ onMounted(async () => {
 async function create() {
   busy.value = true
   try {
-    const s = await api.post('/servers', { ...form, subdomain: form.subdomain || null, worldgen: worldPicker.value?.spec() || null })
+    const s = await api.post('/servers', { ...form, subdomain: form.subdomain || null, worldgen: worldPicker.value?.spec() || null, settings: opts.value })
     toast(t('Instalowanie serwera „{name}”…', { name: s.name }), 'success')
     refreshFleet()
     router.push(`/servers/${s.id}/console`)

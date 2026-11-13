@@ -346,6 +346,68 @@ class WorldgenSpec(BaseModel):
     files: list[str] = Field(default_factory=list, max_length=worldgen.MAX_FILES)  # tokens from /worldgen/stage
 
 
+class CreateSettings(BaseModel):
+    """The most important settings, chosen in the wizard and written before the first start."""
+    online_mode: bool = True
+    max_players: int = Field(default=20, ge=1, le=1000)
+    whitelist: bool = False
+    auth_enabled: bool = True  # MineNodeAuth login when online-mode is off
+    bedrock: bool = False
+    gamemode: Literal["survival", "creative", "adventure", "spectator"] = "survival"
+    difficulty: Literal["peaceful", "easy", "normal", "hard"] = "easy"
+    hardcore: bool = False
+    pvp: bool = True
+    allow_flight: bool = False
+    view_distance: int = Field(default=10, ge=2, le=32)
+    start_on_join: bool = False
+    idle_shutdown_minutes: int = Field(default=0, ge=0, le=24 * 60)
+
+
+def _bedrock_check(engine: str, mc_version: str, online_mode: bool) -> dict:
+    """Bedrock compatibility of a server that does not exist yet (same rules as for an existing one)."""
+    from types import SimpleNamespace
+    fake = SimpleNamespace(cfg=SimpleNamespace(type=engine, mc_version=mc_version), online_mode=online_mode,
+                           dir=TMP_DIR / "nonexistent-bedrock-check", running=False, started_at=0)
+    bp = manager.bedrock
+    return bedrock_compat.quick_state(fake, bp.geyser_java_version if bp else None)
+
+
+def _apply_create_settings(inst: ServerInstance, st: "CreateSettings") -> None:
+    update_properties(inst.dir / "server.properties", {
+        "online-mode": st.online_mode, "max-players": st.max_players,
+        "white-list": st.whitelist, "enforce-whitelist": st.whitelist,
+        "gamemode": st.gamemode, "difficulty": st.difficulty, "hardcore": st.hardcore, "pvp": st.pvp,
+        "allow-flight": st.allow_flight, "view-distance": st.view_distance,
+    })
+    inst.cfg.auth_enabled = st.auth_enabled
+    inst.cfg.start_on_join = st.start_on_join
+    inst.cfg.idle_shutdown_minutes = st.idle_shutdown_minutes
+    manager.save_server(inst.cfg)
+
+
+async def _enable_bedrock_after_create(inst: ServerInstance) -> None:
+    """Install the Geyser translator (if needed) and turn Bedrock on; a failure only logs."""
+    bp = manager.bedrock
+    try:
+        await bedrock_compat.ensure(inst, bp.geyser_java_version if bp else None)
+        inst.cfg.bedrock_enabled = True
+        manager.save_server(inst.cfg)
+        if bp:
+            bp.request_apply()
+        inst.panel_log("Bedrock Edition włączony – gracze Bedrock wejdą tym samym adresem.")
+        inst.broadcast({"type": "state", "state": inst.state, "summary": inst.summary()})
+    except Exception as exc:  # noqa: BLE001
+        inst.panel_log(f"Nie udało się włączyć Bedrocka: {exc} – spróbuj w Ustawieniach serwera.")
+
+
+@router.get("/bedrock/check")
+async def bedrock_check(engine: str, mc: str, online_mode: bool = False, _: str = Depends(auth.require_user)):
+    if engine not in SERVER_TYPES:
+        raise HTTPException(404, "Nieznany silnik")
+    state = _bedrock_check(engine, mc, online_mode)
+    return {"supported": state.get("supported", False), "state": state.get("state"), "reason": state.get("reason")}
+
+
 class CreateServer(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     type: ServerType
@@ -355,6 +417,7 @@ class CreateServer(BaseModel):
     java: JavaConfig = JavaConfig()
     eula: bool = False
     worldgen: Optional[WorldgenSpec] = None
+    settings: Optional[CreateSettings] = None
 
 
 def _unique_subdomain(wanted: str | None, name: str) -> str:
@@ -376,12 +439,21 @@ async def create_server(body: CreateServer, _: str = Depends(auth.require_user))
     spec = body.worldgen.model_dump() if body.worldgen else None
     # Checked before anything is created: a bad generator file must not leave a half-made server behind.
     files = worldgen.validate(spec, body.type, body.mc_version) if spec else []
+    st = body.settings
+    if st and st.bedrock:
+        check = _bedrock_check(body.type, body.mc_version, st.online_mode)
+        if not check.get("supported"):
+            raise HTTPException(400, f"Bedrock: {check.get('reason') or 'ten serwer nie jest zgodny z Geyserem'}")
     inst = manager.create(name=body.name, type=body.type, mc_version=body.mc_version,
                           loader_version=body.loader_version or None,
                           subdomain=_unique_subdomain(body.subdomain, body.name), java=body.java.model_dump())
+    if st:
+        await asyncio.to_thread(_apply_create_settings, inst, st)
     if spec:
         await asyncio.to_thread(worldgen.apply, inst, spec, files, inst.panel_log)
     await inst.install(eula=True)
+    if st and st.bedrock:
+        inst.spawn(_enable_bedrock_after_create(inst))
     return inst.summary()
 
 
