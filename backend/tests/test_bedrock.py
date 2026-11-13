@@ -230,6 +230,8 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("  port: 25565", text)
         self.assertIn("  auth-type: online", text)
         self.assertIn("  forward-hostname: true", text)
+        self.assertIn("advanced:", text)
+        self.assertIn("    use-haproxy-protocol: true", text)
         self.assertIn("saved-user-logins: []", text)
         self.assertIn("log-player-ip-addresses: false", text)
 

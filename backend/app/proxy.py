@@ -184,7 +184,7 @@ class MinecraftProxy:
             await self._close(writer)
         except _Piped as piped:
             await self._pipe(reader, writer, piped.r, piped.w, piped.inst, piped.player,
-                             piped.track, piped.auth_name, piped.auth_ip)
+                             piped.track, piped.auth_name, piped.auth_ip, piped.protocol)
         except _Http as req:
             await self._serve_http(writer, req.method, req.path)
         except Exception:
@@ -192,7 +192,10 @@ class MinecraftProxy:
             await self._close(writer)
 
     async def _route(self, reader, writer, peer) -> None:
-        first = await reader.readexactly(1)
+        # Geyser is configured to prefix its Java connection with a PROXY v2
+        # header containing the real Bedrock address.  The header is only
+        # trusted from loopback, so a public client cannot spoof its IP.
+        first, peer, reader = await self._read_inbound_prefix(reader, peer)
         if first == b"\xfe":  # legacy (<1.7) server list ping – not supported, close politely
             await self._close(writer)
             return
@@ -293,7 +296,59 @@ class MinecraftProxy:
         up_w.write(buffered)
         await up_w.drain()
         raise _Piped(up_r, up_w, inst, player if next_state in (2, 3) else None,
-                     track=target is not lobby, auth_name=auth_name, auth_ip=auth_ip)
+                     track=target is not lobby, auth_name=auth_name, auth_ip=auth_ip,
+                     protocol=protocol)
+
+    async def _read_inbound_prefix(self, reader, peer) -> tuple[bytes, tuple, "_PrefixedReader"]:
+        """Return the first handshake byte, the effective client address and a reader wrapper.
+
+        A normal Minecraft handshake can legitimately start with 0x0d (``\\r``),
+        so the PROXY signature is only accepted after checking all 12 bytes.
+        """
+        first = await reader.readexactly(1)
+        if first != b"\r":
+            return first, peer, _PrefixedReader(reader)
+
+        rest = await reader.readexactly(len(PROXY_V2_SIG) - 1)
+        if first + rest != PROXY_V2_SIG:
+            # Not a PROXY header – these bytes are the start of the handshake.
+            return first, peer, _PrefixedReader(reader, rest)
+        if not _is_loopback_peer(peer):
+            raise ProtocolError("PROXY header from a non-loopback peer")
+
+        source = await self._read_proxy_v2(reader)
+        first = await reader.readexactly(1)
+        return first, source or peer, _PrefixedReader(reader)
+
+    @staticmethod
+    async def _read_proxy_v2(reader) -> tuple[str, int] | None:
+        head = await reader.readexactly(4)
+        version_command, family_protocol = head[0], head[1]
+        length = struct.unpack("!H", head[2:4])[0]
+        if version_command >> 4 != 2:
+            raise ProtocolError("unsupported PROXY protocol version")
+        payload = await reader.readexactly(length)
+        if version_command & 0x0F == 0:  # LOCAL – health check, no forwarded address
+            return None
+        if version_command & 0x0F != 1:  # only PROXY (not LOCAL)
+            raise ProtocolError("invalid PROXY protocol command")
+
+        family = family_protocol >> 4
+        try:
+            if family == 1 and len(payload) >= 12:      # AF_INET, TCP
+                ip = socket.inet_ntop(socket.AF_INET, payload[0:4])
+                port = struct.unpack("!H", payload[8:10])[0]
+                return ip, port
+            if family == 2 and len(payload) >= 36:      # AF_INET6, TCP
+                ip = socket.inet_ntop(socket.AF_INET6, payload[0:16])
+                address = ipaddress.ip_address(ip)
+                if address.ipv4_mapped:
+                    ip = str(address.ipv4_mapped)
+                port = struct.unpack("!H", payload[32:34])[0]
+                return ip, port
+        except (OSError, ValueError, struct.error):
+            return None
+        return None
 
     @staticmethod
     def _not_whitelisted(inst: "ServerInstance", player: str) -> bool:
@@ -407,7 +462,8 @@ class MinecraftProxy:
             await self._close(writer)
 
     async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance", player: str | None = None,
-                    track: bool = True, auth_name: str | None = None, auth_ip: str | None = None) -> None:
+                    track: bool = True, auth_name: str | None = None, auth_ip: str | None = None,
+                    protocol: int = -1) -> None:
         sid = inst.cfg.id if track else "auth-lobby"
         self.active += 1
         if track:
@@ -417,6 +473,16 @@ class MinecraftProxy:
         if track and key and sock is not None:
             self.sessions.setdefault(sid, {})[key] = sock
 
+        sniffer = None
+        if auth_name and auth_ip:
+            from .fingerprint import PacketSniffer
+            from .auth_sessions import record_fingerprint
+
+            def capture(snapshot: dict) -> None:
+                record_fingerprint(auth_name, auth_ip, protocol, snapshot)
+
+            sniffer = PacketSniffer(protocol, on_capture=capture)
+
         async def copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, up: bool) -> None:
             try:
                 while True:
@@ -425,6 +491,8 @@ class MinecraftProxy:
                         break
                     if up:
                         self.bytes_up += len(data)
+                        if sniffer is not None:
+                            sniffer.feed(data)
                     else:
                         self.bytes_down += len(data)
                     dst.write(data)
@@ -455,6 +523,8 @@ class MinecraftProxy:
                     if not live:
                         self.sessions.pop(sid, None)
             if auth_name and auth_ip:
+                if sniffer is not None:
+                    sniffer.flush()
                 lobby_obj = getattr(self.m, "auth_lobby", None)
                 if lobby_obj:
                     lobby_obj.touch(auth_name, auth_ip)
@@ -468,6 +538,57 @@ class MinecraftProxy:
             await asyncio.wait_for(writer.wait_closed(), 2)
 
 
+class _PrefixedReader:
+    """StreamReader facade that replays bytes consumed while checking a PROXY header."""
+
+    def __init__(self, reader, prefix: bytes = b""):
+        self._reader = reader
+        self._prefix = bytearray(prefix)
+
+    async def readexactly(self, n: int) -> bytes:
+        if n <= 0:
+            return b""
+        out = bytearray()
+        if self._prefix:
+            take = min(n, len(self._prefix))
+            out += self._prefix[:take]
+            del self._prefix[:take]
+            n -= take
+        if n:
+            out += await self._reader.readexactly(n)
+        return bytes(out)
+
+    async def read(self, n: int = -1) -> bytes:
+        if not self._prefix:
+            return await self._reader.read(n)
+        if n is None or n < 0:
+            out = bytes(self._prefix)
+            self._prefix.clear()
+            return out + await self._reader.read(n)
+        if n == 0:
+            return b""
+        if len(self._prefix) >= n:
+            out = bytes(self._prefix[:n])
+            del self._prefix[:n]
+            return out
+        out = bytes(self._prefix)
+        self._prefix.clear()
+        return out + await self._reader.read(n - len(out))
+
+    async def readuntil(self, separator: bytes = b"\n") -> bytes:
+        if not self._prefix:
+            return await self._reader.readuntil(separator)
+        index = self._prefix.find(separator)
+        if index >= 0:
+            end = index + len(separator)
+            out = bytes(self._prefix[:end])
+            del self._prefix[:end]
+            return out
+        prefix = bytes(self._prefix)
+        self._prefix.clear()
+        return prefix + await self._reader.readuntil(separator)
+
+
 class _Http(Exception):
     def __init__(self, method: str, path: str):
         super().__init__()
@@ -477,10 +598,12 @@ class _Http(Exception):
 class _Piped(Exception):
     """Control-flow signal: the handshake was routed, start piping outside of the timeout scope."""
 
-    def __init__(self, r, w, inst, player=None, track=True, auth_name=None, auth_ip=None):
+    def __init__(self, r, w, inst, player=None, track=True, auth_name=None, auth_ip=None,
+                 protocol=-1):
         super().__init__()
         self.r, self.w, self.inst, self.player = r, w, inst, player
         self.track, self.auth_name, self.auth_ip = track, auth_name, auth_ip
+        self.protocol = protocol
 
 
 def tcp_rtt_ms(sock) -> int | None:
@@ -507,4 +630,14 @@ def _is_loopback(sock) -> bool:
     try:
         return ipaddress.ip_address(sock.getpeername()[0].split("%", 1)[0]).is_loopback
     except (OSError, ValueError, IndexError, TypeError):
+        return False
+
+
+def _is_loopback_peer(peer) -> bool:
+    try:
+        address = ipaddress.ip_address(str(peer[0]).split("%", 1)[0])
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        return address.is_loopback
+    except (ValueError, IndexError, TypeError):
         return False

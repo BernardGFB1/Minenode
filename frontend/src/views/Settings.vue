@@ -64,21 +64,6 @@
       </section>
 
       <section class="card">
-        <div class="card-head"><LockKeyhole /><h3>{{ $t('Autoryzacja graczy') }}</h3>
-          <span v-if="s.auth_lobby?.running" class="badge green">{{ $t('lobby działa') }}</span>
-          <span v-else class="badge amber">{{ $t('lobby uruchamiane') }}</span>
-        </div>
-        <div class="card-body col" style="gap: 12px">
-          <div class="small text-2">{{ $t('Autoryzację włącza się osobno w ustawieniach każdego serwera. Lobby jest wspólne dla całego panelu.') }}</div>
-          <div class="callout info small"><Info /><div>
-            {{ $t('Sesja trwa 30 minut od ostatniego wejścia lub wyjścia i jest przypisana do nicku oraz adresu IP.') }}
-            <span v-if="s.auth_lobby?.port"> {{ $t('Port wewnętrzny lobby:') }} <span class="mono">{{ s.auth_lobby.port }}</span>.</span>
-          </div></div>
-          <div v-if="s.auth_lobby?.error" class="callout warn small"><Info />{{ s.auth_lobby.error }}</div>
-        </div>
-      </section>
-
-      <section class="card">
         <div class="card-head"><MonitorSmartphone /><h3>{{ $t('Wygląd wyłączonych serwerów') }}</h3>
           <span class="small muted">{{ $t('to widzi gracz, gdy serwer nie działa') }}</span></div>
         <div class="card-body col" style="gap: 22px">
@@ -182,7 +167,7 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Network, Info, Save, KeyRound, LockKeyhole, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw } from 'lucide-vue-next'
+import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
 import BackupDestinations from '../components/BackupDestinations.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'

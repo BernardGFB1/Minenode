@@ -23,7 +23,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from . import storage as storage_mod
 from . import bedrock_compat, packs, worldgen
-from . import auth, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
+from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
@@ -154,6 +154,63 @@ async def remove_user(username: str, me: str = Depends(auth.require_user)):
     if username == me:
         raise HTTPException(400, "Nie możesz usunąć własnego konta")
     auth.delete_user(username)
+    return {"ok": True}
+
+
+# ====================================================================== player authentication
+
+@router.get("/player-auth/sessions")
+async def player_auth_sessions(q: str = "", _: str = Depends(auth.require_user)):
+    """Active game logins. Passwords and hashes are never returned."""
+    return auth_sessions.sessions(q)
+
+
+@router.get("/player-auth/sessions/{name}")
+async def player_auth_session(name: str, _: str = Depends(auth.require_user)):
+    """One active session with the captured client fingerprint (read-only)."""
+    session = next((item for item in auth_sessions.sessions()
+                    if item["name"].lower() == name.lower()), None)
+    if session is None:
+        raise HTTPException(404, "Nie znaleziono sesji gracza")
+    return {
+        "session": session,
+        "fingerprint": auth_sessions.fingerprint(session["name"], session["ip"]),
+    }
+
+
+@router.delete("/player-auth/sessions/{name}")
+async def player_auth_logout(name: str, _: str = Depends(auth.require_user)):
+    if not auth_sessions.clear_session(name):
+        raise HTTPException(404, "Nie znaleziono sesji gracza")
+    return {"ok": True}
+
+
+@router.get("/player-auth/accounts")
+async def player_auth_accounts(q: str = "", _: str = Depends(auth.require_user)):
+    """Registered game accounts (without password material)."""
+    return auth_sessions.accounts(q)
+
+
+class PlayerPasswordBody(BaseModel):
+    password: str = Field(min_length=auth_sessions.PASSWORD_MIN_LENGTH, max_length=128)
+
+
+@router.put("/player-auth/accounts/{name}/password")
+async def player_auth_set_password(name: str, body: PlayerPasswordBody,
+                                   _: str = Depends(auth.require_user)):
+    try:
+        ok = auth_sessions.set_password(name, body.password)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if not ok:
+        raise HTTPException(404, "Nie znaleziono zarejestrowanego gracza")
+    return {"ok": True}
+
+
+@router.delete("/player-auth/accounts/{name}")
+async def player_auth_delete_account(name: str, _: str = Depends(auth.require_user)):
+    if not auth_sessions.delete_account(name):
+        raise HTTPException(404, "Nie znaleziono zarejestrowanego gracza")
     return {"ok": True}
 
 

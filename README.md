@@ -15,7 +15,8 @@ A self-hosted panel for running Minecraft servers. It ships as a single Docker c
 - **Compatibility checks**: every file in `mods/` or `plugins/` is identified on Modrinth by SHA-1 and checked against the game version and loader. MineNode suggests updates (including "Update all") and prints warnings about incompatible files in the console on every start.
 - **Resource pack hosting on the Minecraft port**: upload a ZIP or get a pack from Modrinth/CurseForge. MineNode validates `pack.mcmeta` (and fixes packs wrapped in a folder), serves the pack over port `25565` from its own subdomain (`packs.mc.example.com`), and writes the URL and SHA-1 into `server.properties` with one click. No extra port is needed.
 - **Simple Voice Chat for every server through one UDP port**: install SVC with one click. A shared UDP proxy (`24454`) routes each player to the right server by the player UUID that SVC puts in every packet.
-- **Bedrock Edition through one shared Geyser port**: enable Bedrock per server and share a single Bedrock port (`19132/tcp` + `19132/udp`). A bundled Geyser extension routes players by the address they entered to the same server as Java Edition. The Java proxy is not modified.
+- **Bedrock Edition through one shared Geyser port**: enable Bedrock per server and share a single Bedrock port (`19132/tcp` + `19132/udp`). A bundled Geyser extension routes players by the address they entered to the same server as Java Edition. The Java proxy also receives the player's real Bedrock address through the PROXY protocol.
+- **Player authentication for offline servers**: a hidden Paper lobby with `/register` and `/login`, enabled per server. The **Autoryzacja** tab manages active sessions and passwords and shows informational client fingerprints without ever exposing passwords.
 - **Live console** (WebSocket) with ANSI colours, command history, filtering and WARN/ERROR highlighting.
 - **Monitoring**: process CPU and RAM (15-minute charts), online players, host resources and the container memory limit.
 - **Lifecycle control**: start, graceful stop, restart and kill. Also autostart, crash auto-restart with backoff, start on join, a daily restart, and **auto-stop when nobody is online**.
@@ -99,15 +100,19 @@ The proxy reads the player UUID at the start of every SVC packet and forwards it
 
 ### Bedrock Edition (Geyser)
 
-MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser Standalone, using one shared Bedrock port (`19132` by default). The Java proxy stays untouched: Geyser connects to it as a normal Java client and forwards the address the player entered, so hostname routing, whitelist, *start on join* and voice chat keep working exactly as for Java players.
+MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser Standalone, using one shared Bedrock port (`19132` by default). Hostname routing, whitelist, *start on join*, player IPs and voice chat keep working exactly as for Java players: Geyser connects to the Java proxy as a normal Java client, forwards the address the player entered, and prefixes the connection with a PROXY v2 header carrying the real Bedrock address. The proxy accepts that header only from loopback, so a public client cannot spoof its IP.
 
 MineNode automatically checks the Java version supported by the current Geyser build and keeps Geyser updated from the official Downloads API. Older Paper/Purpur servers receive a managed ViaVersion plugin; Fabric servers receive ViaFabric and Fabric API. The gateway is restarted by itself after a Geyser update, while Minecraft servers are not restarted. Vanilla, Forge, NeoForge and Quilt servers are blocked when they need a translator that their loader cannot provide.
 
 ### Player authentication for offline servers
 
-MineNode runs one hidden, lightweight Paper authentication lobby (`MineNodeAuth`, up to 384 MB heap; configurable with `MINENODE_AUTH_LOBBY_RAM_MB`, clamped to 256–384 MB). The lobby automatically installs ViaVersion, ViaBackwards and ViaRewind, allowing legacy 1.8.x clients and newer clients supported by ViaVersion to connect. Players connecting to an offline-mode server without a valid session are sent to the lobby, where they can use `/register <hasło> <powtórz_hasło>` or `/login <hasło>`. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
+MineNode runs one hidden, lightweight Paper authentication lobby (`MineNodeAuth`, up to 384 MB heap; configurable with `MINENODE_AUTH_LOBBY_RAM_MB`, clamped to 256–384 MB). The lobby automatically installs ViaVersion, ViaBackwards and ViaRewind, allowing legacy 1.7/1.8.x clients and newer clients supported by ViaVersion to connect. Players connecting to an offline-mode server without a valid session are sent to the lobby, where they can use `/register <hasło> <powtórz_hasło>` or `/login <hasło>`. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
 
-Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials and sessions are stored under `auth/`.
+Authentication is managed in the **Autoryzacja** tab (above Settings). It explains how the lobby works and lists active sessions with player names and public IPs (also the real Bedrock IP), plus all registered players. Administrators can end a session, change a player's password or remove it so the player can register again. Existing passwords and hashes are never displayed or returned by the API.
+
+The proxy passively inspects the first client packets of offline-mode authentication sessions and stores an informational fingerprint: Client Information (locale, view distance, chat and skin settings, main hand), the client brand and announced Plugin Message channel names with sizes and SHA-256 digests. Packet payloads are not stored. Clicking an active session shows the fingerprint and its capture details. It is read-only for now – logins are not blocked based on the fingerprint.
+
+Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials, sessions and fingerprints are stored under `auth/` (fingerprints are pruned after 7 days and cleared on logout, password change or account removal).
 
 ### Portable server packages
 
@@ -204,7 +209,10 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `main.py` | App and lifecycle (graceful server shutdown on `docker stop`), CSRF, SPA serving |
 | `api.py` | REST + WebSocket endpoints |
 | `manager.py` | Server processes, console, metrics (psutil), log parsing (players, whitelist rejections), scheduler, idle shutdown |
-| `proxy.py` | Minecraft-aware TCP proxy: parses Handshake/Login Start, routes by host, answers for offline servers, optional PROXY protocol v2, serves resource packs over HTTP on the same port |
+| `proxy.py` | Minecraft-aware TCP proxy: parses Handshake/Login Start, routes by host, answers for offline servers, optional inbound PROXY protocol v2 (real Bedrock IP), serves resource packs over HTTP on the same port |
+| `fingerprint.py` | Passive Client Information / Plugin Message sniffer and version-tolerant packet framing used by the session fingerprint |
+| `auth_sessions.py` | Shared player account, session and fingerprint storage used by the proxy and the Paper lobby |
+| `auth_lobby.py` | Hidden Paper authentication lobby, plugin and Via installation, lifecycle |
 | `voice.py` | UDP proxy for Simple Voice Chat (routing by player UUID) and SVC config management |
 | `bedrock.py` | Shared Geyser Bedrock gateway: downloads Geyser, generates `config.yml` and hostname routes, manages the process and global auth mode. `backend/bedrock_ext/` is the bundled MineNodeRouter extension that resolves each Bedrock hostname (compiled JAR is committed) |
 | `providers.py` | Version discovery and engine installation (incl. Forge/NeoForge/Quilt installers) |
@@ -232,6 +240,8 @@ Some authors block API downloads of their files. MineNode lists those files in t
 ├── java/temurin-<N>/      # downloaded Java runtimes
 ├── panel/                 # servers.json, settings.json, users.json, secret.key, players/
 ├── bedrock/               # Geyser jar, config.yml, logs, extensions/MineNodeRouter
+├── auth-lobby/            # hidden Paper authentication lobby and its plugins
+├── auth/                  # player credentials, sessions and informational client fingerprints
 └── tmp/                   # temporary install files
 ```
 

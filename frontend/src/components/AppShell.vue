@@ -13,6 +13,7 @@
         <router-link to="/" class="nav-item" exact-active-class="active"><LayoutGrid /> {{ $t('Serwery') }}</router-link>
         <router-link to="/new" class="nav-item" active-class="active"><Plus /> {{ $t('Nowy serwer') }}</router-link>
         <router-link to="/modpacks" class="nav-item" active-class="active"><Package /> {{ $t('Modpacki') }}</router-link>
+        <router-link to="/auth" class="nav-item" active-class="active"><ShieldCheck /> {{ $t('Autoryzacja') }}</router-link>
         <router-link to="/settings" class="nav-item" active-class="active"><Settings2 /> {{ $t('Ustawienia') }}</router-link>
       </nav>
 
@@ -57,7 +58,7 @@
 <script setup>
 import { onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { LayoutGrid, Plus, Package, Settings2, LogOut, Sun, Moon, Menu } from 'lucide-vue-next'
+import { LayoutGrid, Plus, Package, Settings2, ShieldCheck, LogOut, Sun, Moon, Menu } from 'lucide-vue-next'
 import BrandMark from './BrandMark.vue'
 import LangSwitch from './LangSwitch.vue'
 import { api } from '../api'

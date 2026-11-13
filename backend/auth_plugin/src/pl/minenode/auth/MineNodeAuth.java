@@ -10,6 +10,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import javax.crypto.SecretKeyFactory;
@@ -25,12 +26,16 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Minimal password plugin for the hidden MineNode authentication lobby. */
 public final class MineNodeAuth extends JavaPlugin implements Listener {
     private static final long TTL = 30 * 60;
+    private static final long PENDING_TTL = 30 * 60;
     private static final int ITERATIONS = 120_000;
     private final SecureRandom random = new SecureRandom();
+    private final Map<String, String> realIps = new ConcurrentHashMap<>();
     private Path file;
     private Path pending;
 
@@ -55,11 +60,20 @@ public final class MineNodeAuth extends JavaPlugin implements Listener {
     @EventHandler public void join(PlayerJoinEvent event) {
         event.setJoinMessage(null);
         Player p = event.getPlayer();
+        // Resolve the real client IP immediately after the proxy wrote it.
+        // Keeping it in memory avoids a 127.0.0.1 fallback if the player
+        // spends a while in the lobby before using /register or /login.
+        String realIp = pendingIp(p);
+        if (realIp != null) realIps.put(p.getName().toLowerCase(Locale.ROOT), realIp);
         p.setGameMode(GameMode.SPECTATOR);
         p.getInventory().clear();
         World world = Bukkit.getWorld("auth");
         if (world != null) p.teleport(world.getSpawnLocation());
         p.sendMessage(ChatColor.YELLOW + "MineNode: zaloguj się przez /login <hasło> lub zarejestruj przez /register <hasło> <hasło>");
+    }
+
+    @EventHandler public void quit(PlayerQuitEvent event) {
+        realIps.remove(event.getPlayer().getName().toLowerCase(Locale.ROOT));
     }
 
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -98,15 +112,25 @@ public final class MineNodeAuth extends JavaPlugin implements Listener {
     private void kick(Player p, String message) { getServer().getScheduler().runTask(this, () -> p.kickPlayer(ChatColor.GREEN + message)); }
     private long expiry() { return System.currentTimeMillis() / 1000 + TTL; }
     private String ip(Player p) {
-        try {
-            long now = System.currentTimeMillis() / 1000;
-            for (String line : Files.readAllLines(pending, StandardCharsets.UTF_8)) {
-                String[] parts = line.split("\\t", -1);
-                if (parts.length == 3 && parts[0].equalsIgnoreCase(p.getName()) && now - Long.parseLong(parts[2]) < 120) return parts[1];
-            }
-        } catch (Exception ignored) { }
+        String cached = realIps.get(p.getName().toLowerCase(Locale.ROOT));
+        if (cached != null) return cached;
+        String fromPending = pendingIp(p);
+        if (fromPending != null) return fromPending;
         if (p.getAddress() instanceof InetSocketAddress a && a.getAddress() != null) return a.getAddress().getHostAddress();
         return "unknown";
+    }
+
+    /** Read the real IP written by the proxy when it routed the player to this lobby. */
+    private String pendingIp(Player p) {
+        try {
+            double now = System.currentTimeMillis() / 1000.0;
+            for (String line : Files.readAllLines(pending, StandardCharsets.UTF_8)) {
+                String[] parts = line.split("\\t", -1);
+                if (parts.length == 3 && parts[0].equalsIgnoreCase(p.getName())
+                        && now - Double.parseDouble(parts[2]) < PENDING_TTL) return parts[1];
+            }
+        } catch (Exception ignored) { }
+        return null;
     }
     private String bytes(int n) { byte[] b = new byte[n]; random.nextBytes(b); return HexFormat.of().formatHex(b); }
     private String hash(String password, String salt) {

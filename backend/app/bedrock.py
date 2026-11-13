@@ -388,6 +388,11 @@ class BedrockProxy:
             "  passthrough-player-counts: true\n"
             "gameplay:\n"
             "  server-name: 'MineNode'\n"
+            "advanced:\n"
+            "  java:\n"
+            # Geyser prefixes the Java connection with a PROXY v2 header carrying
+            # the real Bedrock address. The proxy trusts it only from loopback.
+            "    use-haproxy-protocol: true\n"
             "log-player-ip-addresses: false\n"
             "enable-metrics: false\n"
             "debug-mode: false\n"

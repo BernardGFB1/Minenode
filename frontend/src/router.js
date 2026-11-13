@@ -7,6 +7,7 @@ const routes = [
   { path: '/', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
   { path: '/new', name: 'create', component: () => import('./views/CreateServer.vue') },
   { path: '/modpacks', name: 'modpacks', component: () => import('./views/Modpacks.vue') },
+  { path: '/auth', name: 'auth', component: () => import('./views/Auth.vue') },
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
   {
     path: '/servers/:id',

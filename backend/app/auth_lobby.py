@@ -75,7 +75,7 @@ class AuthLobby:
         if not PLUGIN.is_file():
             raise RuntimeError("Brak MineNodeAuth.jar – zbuduj backend/auth_plugin")
         target = self.dir / "plugins" / "MineNodeAuth.jar"
-        if not target.exists() or target.stat().st_size != PLUGIN.stat().st_size:
+        if not target.exists() or target.read_bytes() != PLUGIN.read_bytes():
             target.write_bytes(PLUGIN.read_bytes())
         for name, project in VIA_PLUGINS.items():
             await self._ensure_via_plugin(name, project)
