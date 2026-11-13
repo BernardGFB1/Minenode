@@ -6,8 +6,9 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 
 from fastapi import HTTPException, Request, WebSocket
 
@@ -20,7 +21,16 @@ SESSION_TTL = 14 * 24 * 3600
 
 _users = JsonStore(PANEL_DIR / "users.json", dict)
 _secret_file = PANEL_DIR / "secret.key"
-_attempts: dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
+# Login throttling. Every attempt is counted before the password is checked, so parallel requests
+# cannot slip past the limit; the per-account limit also holds when an attacker spreads attempts
+# over many IP addresses.
+ATTEMPT_WINDOW = 300          # seconds
+IP_LIMIT = 8                  # attempts per client IP per window
+ACCOUNT_LIMIT = 20            # attempts per username per window, from any IP
+_MAX_TRACKED = 10_000         # bound memory when someone cycles through addresses or names
+_attempts: dict[str, deque] = {}
+_attempts_lock = threading.Lock()
+_dummy_hash: str | None = None
 
 
 def _secret() -> bytes:
@@ -92,22 +102,52 @@ def bootstrap() -> None:
         create_user(BOOTSTRAP_USER, BOOTSTRAP_PASSWORD)
 
 
-def check_rate_limit(ip: str) -> None:
-    q = _attempts[ip]
-    now = time.time()
-    while q and now - q[0] > 300:
+def _recent(key: str, now: float) -> deque:
+    q = _attempts.get(key)
+    if q is None:
+        if len(_attempts) >= _MAX_TRACKED:  # drop the stalest half instead of growing forever
+            for k in sorted(_attempts, key=lambda k: _attempts[k][-1] if _attempts[k] else 0)[: _MAX_TRACKED // 2]:
+                del _attempts[k]
+        q = _attempts[key] = deque()
+    while q and now - q[0] > ATTEMPT_WINDOW:
         q.popleft()
-    if len(q) >= 8:
-        raise HTTPException(429, "Zbyt wiele prób logowania. Spróbuj ponownie za kilka minut.")
+    return q
+
+
+def check_rate_limit(ip: str, username: str = "") -> None:
+    """Reserve one login attempt for this IP and account, or refuse with 429 when over the limit."""
+    keys = [(f"ip:{ip}", IP_LIMIT)] + ([(f"user:{username.lower()}", ACCOUNT_LIMIT)] if username else [])
+    now = time.time()
+    with _attempts_lock:
+        queues = [(_recent(k, now), limit) for k, limit in keys]
+        if any(len(q) >= limit for q, limit in queues):
+            raise HTTPException(429, "Zbyt wiele prób logowania. Spróbuj ponownie za kilka minut.")
+        for q, _ in queues:
+            q.append(now)
+
+
+def _clear_attempts(ip: str, username: str) -> None:
+    with _attempts_lock:
+        _attempts.pop(f"ip:{ip}", None)
+        _attempts.pop(f"user:{username.lower()}", None)
+
+
+def _dummy() -> str:
+    global _dummy_hash
+    if _dummy_hash is None:
+        _dummy_hash = hash_password(secrets.token_urlsafe(16))
+    return _dummy_hash
 
 
 def login(username: str, password: str, ip: str) -> str:
-    check_rate_limit(ip)
+    check_rate_limit(ip, username)
     raw = _users.data.get(username)
-    if not raw or not verify_password(password, raw["password_hash"]):
-        _attempts[ip].append(time.time())
+    # An unknown user still costs one scrypt run, so the response time does not reveal which
+    # usernames exist.
+    ok = verify_password(password, raw["password_hash"] if raw else _dummy())
+    if not raw or not ok:
         raise HTTPException(401, "Nieprawidłowy login lub hasło")
-    _attempts.pop(ip, None)
+    _clear_attempts(ip, username)
     return make_token(username)
 
 

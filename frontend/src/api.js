@@ -77,10 +77,11 @@ export function connectServer(id, onMessage, onStatus) {
   let closed = false
   let retry = 0
   let timer
+  let authRetry = false
   const open = () => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     ws = new WebSocket(`${proto}://${location.host}/api/servers/${id}/ws`)
-    ws.onopen = () => { retry = 0; onStatus?.('open') }
+    ws.onopen = () => { retry = 0; authRetry = false; onStatus?.('open') }
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data)
       if (msg.type === 'batch') msg.messages.forEach(onMessage)
@@ -88,7 +89,15 @@ export function connectServer(id, onMessage, onStatus) {
     }
     ws.onclose = (e) => {
       onStatus?.('closed')
-      if (closed || e.code === 4401 || e.code === 4404) return
+      if (closed || e.code === 4404) return
+      if (e.code === 4401) {
+        // The session ended. Changing your own password issues a new cookie, so try once more with
+        // it; a second refusal means the user really is logged out.
+        if (authRetry) return
+        authRetry = true
+        timer = setTimeout(open, 300)
+        return
+      }
       timer = setTimeout(open, Math.min(10000, 500 * 2 ** retry++))
     }
   }

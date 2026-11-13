@@ -47,4 +47,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MINENODE_PORT\",\"8080\")}/api/health',timeout=4)" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
-CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host 0.0.0.0 --port ${MINENODE_PORT} --proxy-headers --forwarded-allow-ips='*' --no-server-header"]
+# X-Forwarded-For is only trusted from MINENODE_TRUSTED_PROXIES (your reverse proxy). Trusting it from
+# anyone would let clients pick their own IP and bypass the login attempt limit.
+CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host 0.0.0.0 --port ${MINENODE_PORT} --proxy-headers --forwarded-allow-ips=\"${MINENODE_TRUSTED_PROXIES:-127.0.0.1}\" --no-server-header"]

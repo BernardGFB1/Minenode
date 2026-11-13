@@ -38,8 +38,23 @@
             <span v-else class="pending"><Loader2 class="spin" style="width: 12px; height: 12px" /> {{ $t('Uruchamianie…') }}</span>
           </dd>
           <dt>{{ $t('Adres połączenia gry') }}</dt>
-          <dd class="mono">{{ v.advertise?.length ? v.advertise.join(', ') : $t('wykrywany automatycznie (STUN)') }}</dd>
+          <dd class="mono" :title="v.advertise?.length > 1 ? v.advertise.join(', ') : null">
+            <template v-if="v.advertise_own">{{ v.public_host }}</template>
+            <template v-else-if="v.advertise?.length">{{ v.advertise.join(', ') }}
+              <span v-if="v.advertise_match" class="ok small">· {{ $t('to samo IP co adres dla graczy') }}</span>
+            </template>
+            <template v-else>{{ $t('wykrywany automatycznie (STUN)') }}</template>
+          </dd>
         </dl>
+
+        <div v-if="v.public_host && !v.address_resolves" class="callout warn small">
+          <AlertTriangle />
+          <div>{{ $t('Adres {host} nie ma rekordu DNS – gracze nie znajdą pod nim serwera. Dodaj rekord A (lub wildcard *.domena) wskazujący na ten serwer.', { host: v.public_host }) }}</div>
+        </div>
+        <div v-else-if="v.advertise_match === false" class="callout warn small">
+          <AlertTriangle />
+          <div>{{ $t('Adres dla graczy prowadzi do {a}, a połączenie gry do {b}. Gracze zobaczą serwer, ale nie wejdą – popraw DNS albo publiczny adres w ustawieniach panelu.', { a: v.address_ips.join(', '), b: v.advertise_ips.join(', ') }) }}</div>
+        </div>
 
         <div v-if="v.advertise_source === 'stun'" class="callout warn small">
           <AlertTriangle />

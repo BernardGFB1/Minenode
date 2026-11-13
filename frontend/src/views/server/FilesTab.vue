@@ -21,7 +21,7 @@
       <div class="progress grow"><div :style="{ width: uploading.p * 100 + '%' }" /></div>
     </div>
 
-    <div class="card files" :class="{ over: dragOver }" @dragover.prevent="dragOver = true" @dragleave.self="dragOver = false" @drop.prevent="onDrop">
+    <div class="card files" :class="{ over: dragOver }" @dragover="onDragOver" @dragleave="onDragLeave" @drop.prevent="onDrop">
       <table class="table">
         <thead>
           <tr>
@@ -73,7 +73,7 @@
   </div>
 </template>
 <script setup>
-import { computed, inject, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { HardDrive, ChevronRight, Trash2, FolderPlus, FilePlus, Upload, Download, Loader2, CornerLeftUp, Folder, FileText, FileCode2, FileArchive, FileImage, File, Coffee, PackageOpen, PenLine, Save, Settings } from 'lucide-vue-next'
 import Modal from '../../components/Modal.vue'
 import { api, download, uploadWithProgress } from '../../api'
@@ -189,7 +189,32 @@ async function uploadFiles(list) {
     load()
   } catch (e) { toastError(e) } finally { uploading.value = null }
 }
-function onDrop(e) { dragOver.value = false; uploadFiles(e.dataTransfer.files) }
+function onDrop(e) { endDrag(); uploadFiles(e.dataTransfer.files) }
+
+// Drop overlay. `dragleave` also fires when moving between child elements, so it only ends the drag
+// when the pointer really leaves the card. A drag cancelled with Esc or dropped outside the page
+// ends without any event here, hence the window listeners and a watchdog that turns the overlay off
+// once `dragover` (sent continuously while hovering) stops arriving.
+let dragWatchdog
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files')
+function endDrag() { clearTimeout(dragWatchdog); dragOver.value = false }
+function onDragOver(e) {
+  if (!hasFiles(e)) return
+  e.preventDefault()
+  dragOver.value = true
+  clearTimeout(dragWatchdog)
+  dragWatchdog = setTimeout(endDrag, 1000)
+}
+// Some browsers (Safari) leave relatedTarget empty even between child elements, so a leave only
+// schedules the end; the next dragover over the card cancels it.
+function scheduleEnd() { clearTimeout(dragWatchdog); dragWatchdog = setTimeout(endDrag, 80) }
+function onDragLeave(e) { if (!e.currentTarget.contains(e.relatedTarget)) scheduleEnd() }
+const onWindowDragLeave = (e) => { if (!e.relatedTarget) scheduleEnd() } // pointer left the browser window
+for (const [ev, fn] of [['drop', endDrag], ['dragend', endDrag], ['dragleave', onWindowDragLeave]]) {
+  onMounted(() => window.addEventListener(ev, fn))
+  onUnmounted(() => window.removeEventListener(ev, fn))
+}
+onUnmounted(() => clearTimeout(dragWatchdog))
 </script>
 <style scoped>
 .toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex-wrap: wrap; }

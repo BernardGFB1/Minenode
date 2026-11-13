@@ -83,23 +83,29 @@ def valid_host(host: str) -> bool:
     return bool(HOSTNAME_RE.match(host))
 
 
-_resolve_cache: dict[str, tuple[float, bool]] = {}
+_resolve_cache: dict[str, tuple[float, frozenset[str]]] = {}
 
 
-def _resolves(host: str) -> bool:
-    """Geyser refuses to start signaling when an advertised host name does not resolve – check first (cached)."""
+def resolve_ips(host: str) -> frozenset[str]:
+    """IP addresses a host name resolves to (cached for 5 minutes); empty when it does not resolve."""
+    if _is_ip(host):
+        return frozenset({str(ipaddress.ip_address(host))})
     import socket
     now = time.monotonic()
     hit = _resolve_cache.get(host)
     if hit and now - hit[0] < 300:
         return hit[1]
     try:
-        socket.getaddrinfo(host, None)
-        ok = True
-    except OSError:
-        ok = False
-    _resolve_cache[host] = (now, ok)
-    return ok
+        ips = frozenset(str(ipaddress.ip_address(info[4][0].split("%", 1)[0])) for info in socket.getaddrinfo(host, None))
+    except (OSError, ValueError):
+        ips = frozenset()
+    _resolve_cache[host] = (now, ips)
+    return ips
+
+
+def _resolves(host: str) -> bool:
+    """Geyser refuses to start signaling when an advertised host name does not resolve – check first (cached)."""
+    return bool(resolve_ips(host))
 
 
 def _yaml(value: str) -> str:
@@ -284,15 +290,31 @@ class BedrockProxy:
         if manual:
             return manual, "settings"
         public = normalize_host(s.public_address)
-        if public and valid_host(public):
+        # A domain is only usable when it has a DNS record – Geyser does not start signaling otherwise,
+        # and a wildcard record (*.example.com) does not cover the bare domain itself.
+        if public and valid_host(public) and (_is_ip(public) or _resolves(public)):
             return [f"[{public}]" if ":" in public else public], "public_address"
-        # a server hostname under the base domain resolves through the wildcard record
-        # prefer server subdomains: a wildcard record covers them, the bare base domain often has no record
+        # Advertise every Bedrock server's own player address, so each server's card shows the same
+        # address for players and for the game connection. All of them point at this machine.
+        hosts: list[str] = []
+        for inst in self._bedrock_servers():
+            host = self.public_host(inst)
+            if host and not _is_ip(host) and host not in hosts and _resolves(host):
+                hosts.append(host)
+        if hosts:
+            return hosts, "hostname"
+        # e.g. only a bare base domain or an alias resolves
         roots = {normalize_host(s.base_domain), public}
         for host in sorted(self.route_map(), key=lambda h: (h in roots, h)):
             if not _is_ip(host) and _resolves(host):
                 return [host], "hostname"
         return [], "stun"
+
+    def _bedrock_servers(self) -> list["ServerInstance"]:
+        """Bedrock-enabled servers in a stable order: the default server first, then by id."""
+        default = self._default_server()
+        enabled = [i for i in self.m.instances.values() if i.cfg.bedrock_enabled]
+        return sorted(enabled, key=lambda i: (i is not default, i.cfg.id))
 
     def hosts_for(self, inst: "ServerInstance") -> list[str]:
         return [host for host, routed in self.route_map().items() if routed is inst]

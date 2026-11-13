@@ -182,6 +182,38 @@ class RouteTableTests(unittest.TestCase):
             self.assertEqual(p.advertise_addresses(), ([], "stun"))
             self.assertIn("advertise-addresses: []", p._config_text("online"))
 
+    def test_advertise_lists_every_bedrock_server_address(self):
+        # Each card must show its own player address as the game connection address.
+        a = FakeInst("a", "Survival", "survival")
+        b = FakeInst("b", "BMC", "bmc")
+        off = FakeInst("c", "Off", "aaa", enabled=False)
+        p = make_proxy([a, b, off], base_domain="zzweb.ovh", default_server_id="b")
+        with patch.object(bedrock, "_resolves", return_value=True):
+            hosts, source = p.advertise_addresses()
+        self.assertEqual(source, "hostname")
+        self.assertEqual(hosts, ["bmc.zzweb.ovh", "survival.zzweb.ovh"])  # default server first, no disabled one
+        for inst in (a, b):
+            self.assertIn(p.public_host(inst), hosts)
+        with patch.object(bedrock, "_resolves", side_effect=lambda h: h != "bmc.zzweb.ovh"):
+            self.assertEqual(p.advertise_addresses(), (["survival.zzweb.ovh"], "hostname"))
+
+    def test_public_domain_without_dns_record_is_not_advertised(self):
+        a = FakeInst("a", "Survival", "survival")
+        p = make_proxy([a], public_address="zzweb.ovh")
+        # *.zzweb.ovh resolves, the bare domain does not – Geyser would refuse to start signaling
+        with patch.object(bedrock, "_resolves", side_effect=lambda h: h != "zzweb.ovh"):
+            self.assertEqual(p.advertise_addresses(), (["survival.zzweb.ovh"], "hostname"))
+        with patch.object(bedrock, "_resolves", return_value=True):
+            self.assertEqual(p.advertise_addresses(), (["zzweb.ovh"], "public_address"))
+
+    def test_resolve_ips(self):
+        self.assertEqual(bedrock.resolve_ips("79.163.180.236"), frozenset({"79.163.180.236"}))
+        self.assertEqual(bedrock.resolve_ips("2001:db8::1"), frozenset({"2001:db8::1"}))
+        with patch("socket.getaddrinfo", side_effect=OSError):
+            bedrock._resolve_cache.pop("nothing.invalid", None)
+            self.assertEqual(bedrock.resolve_ips("nothing.invalid"), frozenset())
+            self.assertFalse(bedrock._resolves("nothing.invalid"))
+
     def test_yaml_and_property_escaping(self):
         self.assertEqual(bedrock._yaml("it's"), "'it''s'")
         self.assertEqual(bedrock._escape_property("a\\b\nc"), "a\\\\b\\nc")

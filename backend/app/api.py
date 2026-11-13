@@ -1228,6 +1228,9 @@ async def modpack_versions(source: Literal["modrinth", "curseforge"], project_id
 
 # ====================================================================== websocket
 
+WS_SESSION_CHECK = 15  # seconds between session re-checks of an open console
+
+
 @router.websocket("/servers/{sid}/ws")
 async def server_ws(ws: WebSocket, sid: str):
     user = auth.ws_user(ws)
@@ -1235,6 +1238,12 @@ async def server_ws(ws: WebSocket, sid: str):
     if not user or not inst:
         await ws.close(code=4401 if not user else 4404)
         return
+    token = ws.cookies.get(auth.COOKIE)
+
+    def session_ok() -> bool:
+        # Logout elsewhere, a password change or a deleted account must end an open console too.
+        return auth.verify_token(token) == user
+
     await ws.accept()
     q = inst.subscribe()
     try:
@@ -1252,19 +1261,28 @@ async def server_ws(ws: WebSocket, sid: str):
         async def receiver():
             while True:
                 msg = await ws.receive_json()
+                if not session_ok():
+                    return
                 if msg.get("type") == "command" and isinstance(msg.get("command"), str):
                     try:
                         await inst.send_command(msg["command"][:2000])
                     except ServerError as exc:
                         await ws.send_json({"type": "error", "message": str(exc)})
 
-        tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+        async def watchdog():
+            while session_ok():
+                await asyncio.sleep(WS_SESSION_CHECK)
+
+        tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver()), asyncio.create_task(watchdog())]
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
         for t in done:
             with contextlib.suppress(Exception):
                 t.result()
+        if not session_ok():
+            with contextlib.suppress(Exception):
+                await ws.close(code=4401)  # the client stops reconnecting on 4401
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
@@ -1592,6 +1610,17 @@ def _bedrock_state(inst: ServerInstance) -> dict:
         address = display if BEDROCK_PORT == 19132 else f"{display}:{BEDROCK_PORT}"
     stats = bp.stats() if bp else {}
     compat = bedrock_compat.quick_state(inst, stats.get("java_version"))
+    advertise = stats.get("advertise", [])
+    # Geyser has one list of game-connection addresses for every server. When it holds this server's own
+    # player address the two match; otherwise both must at least lead to the same IP.
+    from .bedrock import normalize_host, resolve_ips
+    advertise_own = bool(host) and host in [normalize_host(a) for a in advertise]
+    address_ips: set[str] = set(resolve_ips(host)) if host and not advertise_own else set()
+    advertise_ips: set[str] = set()
+    if address_ips:
+        for a in advertise:
+            advertise_ips |= resolve_ips(normalize_host(a))
+    advertise_match = None if not (address_ips and advertise_ips) else bool(address_ips & advertise_ips)
     return {
         "enabled": inst.cfg.bedrock_enabled,
         "supported": compat.get("supported", False),
@@ -1607,8 +1636,13 @@ def _bedrock_state(inst: ServerInstance) -> dict:
         "gateway_version": stats.get("version"),
         "router_version": stats.get("router_version"),
         "conflicts": stats.get("conflicts", []),
-        "advertise": stats.get("advertise", []),
+        "advertise": advertise,
         "advertise_source": stats.get("advertise_source"),
+        "advertise_own": advertise_own,
+        "advertise_match": advertise_match,
+        "address_ips": sorted(address_ips),
+        "advertise_ips": sorted(advertise_ips),
+        "address_resolves": bool(host) and bool(resolve_ips(host)),
         "running": inst.running,
     }
 

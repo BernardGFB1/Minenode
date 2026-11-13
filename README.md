@@ -131,6 +131,8 @@ panel.example.com {
 }
 ```
 
+Also set `MINENODE_TRUSTED_PROXIES` to the address of that proxy (for a proxy in another Docker container, its network range such as `172.16.0.0/12`). Only those addresses may tell MineNode the real client IP through `X-Forwarded-For`; anyone else could otherwise pick their own IP and get around the login attempt limit.
+
 WebSockets work out of the box. Expose the Minecraft (`25565/tcp`), voice (`24454/udp`) and Bedrock (`19132/tcp` + `19132/udp`) ports directly.
 
 ### Backup destinations
@@ -167,6 +169,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `MINENODE_DATA` | `/data` | Data directory |
 | `MINENODE_ADMIN_USER` / `MINENODE_ADMIN_PASSWORD` | – | Account created on first start (instead of the wizard) |
 | `MINENODE_SECURE_COOKIES` | `false` | Send session cookies over HTTPS only |
+| `MINENODE_TRUSTED_PROXIES` | `127.0.0.1` | Reverse proxies allowed to set `X-Forwarded-For` (comma-separated IPs or CIDR ranges, e.g. `172.16.0.0/12`). Used for the client IP in the login limit |
 | `CURSEFORGE_API_KEY` | – | CurseForge API key |
 | `PUID` / `PGID` | `1000` | User the panel and servers run as |
 | `TZ` | `Europe/Warsaw` | Time zone (daily restarts, backups) |
@@ -250,6 +253,7 @@ API docs (OpenAPI): `http://localhost:8080/api/docs`.
 
 - The panel runs servers as an unprivileged user (`PUID`/`PGID`), never as root.
 - State-changing requests require an `X-Requested-With` header (CSRF protection), and the WebSocket checks `Origin`.
+- Logins are limited to 8 attempts per IP and 20 per account every 5 minutes, counted before the password is checked. Unknown usernames take as long as known ones, and an open console closes when its session is no longer valid (password change, deleted account).
 - Paths in the file manager, modpack archives and backups are checked against directory traversal (zip-slip).
 - Resource pack URLs contain an unguessable token, and the voice ports of individual servers are bound to `127.0.0.1`.
 - Servers start with `-Dlog4j2.formatMsgNoLookups=true` (Log4Shell protection for older versions).
