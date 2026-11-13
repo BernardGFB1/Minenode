@@ -63,11 +63,11 @@ services:
     container_name: minenode
     restart: unless-stopped
     ports:
-      - "8080:8080"
-      - "25565:25565"
-      - "24454:24454/udp"
-      - "19132:19132/tcp"
-      - "19132:19132/udp"
+      - "8080:8080"           # Web panel, API and WebSocket (HTTP)
+      - "25565:25565"         # Minecraft Java: one shared port for every server (proxy by subdomain) + resource pack downloads
+      - "24454:24454/udp"     # Simple Voice Chat: one shared UDP port for every server
+      - "19132:19132/tcp"     # Bedrock Edition (Geyser): NetherNet signaling – players find the server here
+      - "19132:19132/udp"     # Bedrock Edition (Geyser): gameplay traffic
     volumes:
       - ./data:/data
     environment:
