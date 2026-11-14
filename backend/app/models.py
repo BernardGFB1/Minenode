@@ -82,7 +82,7 @@ class ServerConfig(BaseModel):
     voice_enabled: bool = False  # Simple Voice Chat routed through the shared UDP proxy
     voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
-    auth_enabled: bool = True  # routed through the hidden MineNodeAuth lobby when offline-mode
+    auth_enabled: bool = True  # routed through the hidden PicoLimbo lobby when offline-mode
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None
@@ -138,10 +138,10 @@ class PanelSettings(BaseModel):
     motd_starting: str = "§f{name}\n§e● Serwer się uruchamia…"
     version_offline: str = "§c● Offline"
     version_starting: str = "§e● Uruchamianie"
-    kick_offline: str = "§c{name} jest wyłączony."
-    kick_starting: str = "§e{name} uruchamia się – spróbuj ponownie za chwilę."
+    kick_offline: str = "{name} jest wyłączony."
+    kick_starting: str = "{name} uruchamia się – spróbuj ponownie za chwilę."
     backup_destinations: list[BackupDestination] = []
-    kick_waking: str = "§a{name} właśnie się uruchamia!\n§7Dołącz ponownie za około minutę."
+    kick_waking: str = "{name} właśnie się uruchamia!\nDołącz ponownie za około minutę."
 
 
 class User(BaseModel):

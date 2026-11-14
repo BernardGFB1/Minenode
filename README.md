@@ -16,7 +16,7 @@ A self-hosted panel for running Minecraft servers. It ships as a single Docker c
 - **Resource pack hosting on the Minecraft port**: upload a ZIP or get a pack from Modrinth/CurseForge. MineNode validates `pack.mcmeta` (and fixes packs wrapped in a folder), serves the pack over port `25565` from its own subdomain (`packs.mc.example.com`), and writes the URL and SHA-1 into `server.properties` with one click. No extra port is needed.
 - **Simple Voice Chat for every server through one UDP port**: install SVC with one click. A shared UDP proxy (`24454`) routes each player to the right server by the player UUID that SVC puts in every packet.
 - **Bedrock Edition through one shared Geyser port**: enable Bedrock per server and share a single Bedrock port (`19132/tcp` + `19132/udp`). A bundled Geyser extension routes players by the address they entered to the same server as Java Edition. The Java proxy also receives the player's real Bedrock address through the PROXY protocol.
-- **Player authentication for offline servers**: a hidden Paper lobby with `/register` and `/login`, enabled per server. The **Autoryzacja** tab manages active sessions and passwords and shows informational client fingerprints without ever exposing passwords.
+- **Player authentication for offline servers**: a hidden PicoLimbo Rust lobby with `/register` and `/login`, enabled per server. The **Autoryzacja** tab manages active sessions and passwords and shows informational client fingerprints without ever exposing passwords.
 - **Live console** (WebSocket) with ANSI colours, command history, filtering and WARN/ERROR highlighting.
 - **Monitoring**: process CPU and RAM (15-minute charts), online players, host resources and the container memory limit.
 - **Lifecycle control**: start, graceful stop, restart and kill. Also autostart, crash auto-restart with backoff, start on join, a daily restart, and **auto-stop when nobody is online**.
@@ -106,13 +106,13 @@ MineNode automatically checks the Java version supported by the current Geyser b
 
 ### Player authentication for offline servers
 
-MineNode runs one hidden, lightweight Paper authentication lobby (`MineNodeAuth`, up to 384 MB heap; configurable with `MINENODE_AUTH_LOBBY_RAM_MB`, clamped to 256–384 MB). The lobby automatically installs ViaVersion, ViaBackwards and ViaRewind, allowing legacy 1.7/1.8.x clients and newer clients supported by ViaVersion to connect. Players connecting to an offline-mode server without a valid session are sent to the lobby, where they can use `/register <hasło> <powtórz_hasło>` or `/login <hasło>`. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
+MineNode runs one hidden, lightweight PicoLimbo Rust authentication lobby with `/register` and `/login`. PicoLimbo natively supports clients from 1.7.2 through current supported releases, so the lobby does not need ViaVersion, ViaBackwards or ViaRewind and does not require a Java heap. Players connecting to an offline-mode server without a valid session are sent to the lobby. After successful authentication the lobby disconnects them with a reconnect message; the next connection is routed to the original server. The target server does not need to be Paper and does not receive lobby players in its slot count.
 
 Authentication is managed in the **Autoryzacja** tab (above Settings). It explains how the lobby works and lists active sessions with player names and public IPs (also the real Bedrock IP), plus all registered players. Administrators can end a session, change a player's password or remove it so the player can register again. Existing passwords and hashes are never displayed or returned by the API.
 
-The proxy passively inspects offline-mode authentication sessions and stores an informational fingerprint from stable client-provided join/configuration data: Client Information (locale, view distance, chat and skin settings, main hand), the client brand and announced Plugin Message channel names with sizes and SHA-256 digests. Gameplay packets, chat, movement and inventory data are not stored. A small initial burst is analysed when the player enters; the bounded remainder is analysed when the connection closes. Only stable values (protocol, brand and channel names) are used in the session hash; changing a hash invalidates the session and requires login again. Fingerprints are retained without automatic expiry until the account is removed.
+The proxy passively inspects offline-mode authentication sessions and stores an informational fingerprint from the first 15 seconds of a connection (login and configuration, before normal gameplay): Client Information (locale, view distance, chat and skin settings, main hand), the client brand and announced Plugin Message channel names with sizes and SHA-256 digests. Gameplay packets, chat, movement and inventory data are not stored. The hidden lobby is a different server, so its capture is informational only; the first capture from the actual game server binds the session. Only stable values (protocol, brand and channel names) are used in the session hash, so changing render distance, chat mode or skin visibility does not require a new login. A changed stable fingerprint invalidates the session and requires login again. Fingerprints are retained without automatic expiry until the account is removed.
 
-Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials, sessions and fingerprints are stored under `auth/` (fingerprints are pruned after 7 days and cleared on logout, password change or account removal).
+Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials, sessions and fingerprints are stored under `auth/`. The PicoLimbo authentication module is compiled into the image and changes passwords only through the panel API.
 
 ### Portable server packages
 
@@ -211,10 +211,10 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `manager.py` | Server processes, console, metrics (psutil), log parsing (players, whitelist rejections), scheduler, idle shutdown |
 | `proxy.py` | Minecraft-aware TCP proxy: parses Handshake/Login Start, routes by host, answers for offline servers, optional inbound PROXY protocol v2 (real Bedrock IP), serves resource packs over HTTP on the same port |
 | `fingerprint.py` | Passive Client Information / Plugin Message sniffer and version-tolerant packet framing used by the session fingerprint |
-| `auth_sessions.py` | Shared player account, session and fingerprint storage used by the proxy and the Paper lobby |
-| `auth_lobby.py` | Hidden Paper authentication lobby, plugin and Via installation, lifecycle |
+| `auth_sessions.py` | Shared player account, session and fingerprint storage used by the proxy and the PicoLimbo lobby |
+| `auth_lobby.py` | Hidden PicoLimbo authentication lobby lifecycle |
 | `voice.py` | UDP proxy for Simple Voice Chat (routing by player UUID) and SVC config management |
-| `bedrock.py` | Shared Geyser Bedrock gateway: downloads Geyser, generates `config.yml` and hostname routes, manages the process and global auth mode. `backend/bedrock_ext/` is the bundled MineNodeRouter extension that resolves each Bedrock hostname (compiled JAR is committed) |
+| `bedrock.py` | Shared Geyser Bedrock gateway: downloads Geyser, generates `config.yml` and hostname routes, manages the process and global auth mode. `backend/bedrock_ext/` is the bundled MineNodeRouter extension that resolves each Bedrock hostname (compiled during the Docker build) |
 | `providers.py` | Version discovery and engine installation (incl. Forge/NeoForge/Quilt installers) |
 | `java.py` | Java selection and download from Adoptium |
 | `modpacks.py` | Modrinth `.mrpack`, CurseForge manifests and server packs, file import |
@@ -240,7 +240,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
 ├── java/temurin-<N>/      # downloaded Java runtimes
 ├── panel/                 # servers.json, settings.json, users.json, secret.key, players/
 ├── bedrock/               # Geyser jar, config.yml, logs, extensions/MineNodeRouter
-├── auth-lobby/            # hidden Paper authentication lobby and its plugins
+├── auth-lobby/            # hidden PicoLimbo authentication lobby and config
 ├── auth/                  # player credentials, sessions and informational client fingerprints
 └── tmp/                   # temporary install files
 ```

@@ -7,6 +7,26 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
+# ---------------------------------------------------------------- PicoLimbo authentication lobby
+FROM rust:1.89-bookworm AS picolimbo
+WORKDIR /picolimbo
+COPY backend/picolimbo/ ./
+RUN cargo build --release -p pico_limbo
+
+# ---------------------------------------------------------------- Bedrock router extension (Java)
+# The extension is compiled here, not in the runtime image and not taken from
+# the repository: a stale committed JAR must never hide broken Java sources.
+FROM eclipse-temurin:21-jdk AS bedrock_ext
+WORKDIR /ext
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+# Compile against the same Geyser release the panel downloads at runtime.
+RUN curl -fsSL -o /tmp/geyser-standalone.jar \
+      https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/standalone
+COPY backend/bedrock_ext/ ./
+RUN sh build.sh /tmp/geyser-standalone.jar
+
 # ---------------------------------------------------------------- runtime
 FROM python:3.12-slim-bookworm
 LABEL org.opencontainers.image.title="MineNode" \
@@ -33,8 +53,8 @@ WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY backend/app ./app
-COPY backend/auth_plugin/MineNodeAuth.jar ./auth_plugin/MineNodeAuth.jar
-COPY backend/bedrock_ext/MineNodeRouter.jar ./bedrock_ext/MineNodeRouter.jar
+COPY --from=picolimbo /picolimbo/target/release/pico_limbo ./picolimbo-bin/pico_limbo
+COPY --from=bedrock_ext /ext/MineNodeRouter.jar ./bedrock_ext/MineNodeRouter.jar
 COPY --from=web /web/dist ./static
 COPY docker/entrypoint.sh /entrypoint.sh
 # strip Windows line endings (a CRLF checkout breaks the shebang: "exec /entrypoint.sh failed")

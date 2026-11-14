@@ -140,6 +140,46 @@ def test_sniffer_coalesces_capture_writes_and_flushes_on_close(monkeypatch):
     assert snapshots[-1]["plugin_messages"][0]["count"] == 20
 
 
+def test_sniffer_ignores_gameplay_plugin_messages_after_join_window(monkeypatch):
+    from app import fingerprint
+
+    now = [100.0]
+    monkeypatch.setattr(fingerprint.time, "monotonic", lambda: now[0])
+    snapshots = []
+    sniffer = PacketSniffer(769, on_capture=snapshots.append, capture_seconds=5)
+
+    brand = mc_string("vanilla")
+    sniffer.feed(frame(varint(1) + mc_string("minecraft:brand") + varint(len(brand)) + brand))
+    now[0] += 6
+    voice = mc_string("voicechat")
+    sniffer.feed(frame(varint(1) + mc_string("voicechat:secret") + varint(len(voice)) + voice))
+
+    sniffer.flush()
+    assert len(snapshots) == 1
+    assert [m["channel"] for m in snapshots[0]["plugin_messages"]] == ["minecraft:brand"]
+    assert "voicechat:secret" not in sniffer.plugin_messages
+
+
+def test_sniffer_does_not_publish_a_partial_first_chunk(monkeypatch):
+    from app import fingerprint
+
+    now = [100.0]
+    monkeypatch.setattr(fingerprint.time, "monotonic", lambda: now[0])
+    snapshots = []
+    sniffer = PacketSniffer(769, on_capture=snapshots.append, capture_seconds=30)
+
+    sniffer.feed(frame(varint(0) + client_info()))
+    now[0] += 1
+    brand = mc_string("vanilla")
+    sniffer.feed(frame(varint(1) + mc_string("minecraft:brand") + varint(len(brand)) + brand))
+    now[0] += 1
+    sniffer.flush()
+
+    assert len(snapshots) == 1
+    assert snapshots[0]["client_info"]["locale"] == "en_us"
+    assert snapshots[0]["brand"] == "vanilla"
+
+
 class _Writer:
     def __init__(self):
         self.data = bytearray()

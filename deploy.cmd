@@ -43,7 +43,8 @@ goto :END
 :DOCKER_READY
 echo ==^> Docker Engine jest gotowy!
 
-:: docker build --no-cache -t "%IMAGE_NAME%" .
+:: Docker używa cache; zmiana źródeł lub zależności automatycznie unieważnia
+:: odpowiedni etap i uruchamia ponowną kompilację.
 
 :BUILD
 echo ==^> Budowanie obrazu: %IMAGE_NAME%...

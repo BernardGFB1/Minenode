@@ -1,4 +1,4 @@
-"""Shared MineNodeAuth account and session file used by the TCP proxy and Paper lobby.
+"""Shared MineNodeAuth account and session file used by the TCP proxy and PicoLimbo lobby.
 
 The file is a simple tab-separated database with one row per registered player:
 
@@ -8,19 +8,21 @@ A row exists for every registered player. ``expires_at`` is the end of the
 current 30-minute login session; a zero value means the player is registered
 but must log in again.  Passwords are never exposed through the panel API.
 
-The Paper plugin writes the same format, so the file must stay compatible with
-``MineNodeAuth.java``.  Timestamps are integer Unix seconds.
+The PicoLimbo auth module writes the same format. Timestamps are integer Unix seconds.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import threading
 import time
 
 from .config import DATA_DIR
+
+log = logging.getLogger("minenode.auth")
 
 SESSION_FILE = DATA_DIR / "auth" / "sessions.db"
 PENDING_FILE = DATA_DIR / "auth" / "pending.db"
@@ -102,20 +104,32 @@ def valid(name: str, ip: str) -> bool:
     with _lock:
         data = _read()
         row = data.get(name.lower())
-        if not row or _norm_ip(row[3]) != _norm_ip(ip):
+        if not row:
+            log.info("Auth %s: no registered account", name)
+            return False
+        if _norm_ip(row[3]) != _norm_ip(ip):
+            log.info("Auth %s: IP changed (session=%s, connection=%s)", name, row[3], ip)
             return False
         current = _fingerprints_read().get(name.lower())
-        stored_hash = row[5] if len(row) > 5 else ""
+        stored_hash = row[5].strip() if len(row) > 5 else ""
         current_hash = current.get("hash") if current else ""
         if stored_hash and current_hash and stored_hash != current_hash:
+            # Keep the captured entry for the panel, but the current session
+            # must not be reused by the changed client.
+            log.info("Auth %s: stable client fingerprint changed; re-login required", name)
             row[4] = "0"
+            if len(row) > 5:
+                row[5] = ""
             _write(data)
-            _fingerprint_delete(name)
             return False
-        if not stored_hash and current_hash:
-            row.append(current_hash)
-            _write(data)
-        return _expiry(row) > time.time()
+        # Do not adopt a fingerprint here when the session has no binding yet.
+        # The entry may describe the lobby connection (a different server) or
+        # the previous client. The first target-server capture establishes the
+        # binding for this session.
+        if _expiry(row) <= time.time():
+            log.info("Auth %s: session expired at %s", name, row[4])
+            return False
+        return True
 
 
 def touch(name: str, ip: str) -> bool:
@@ -131,7 +145,7 @@ def touch(name: str, ip: str) -> bool:
 
 
 def set_pending(name: str, ip: str) -> None:
-    """Pass the real client IP to the local Paper lobby (proxy is its peer)."""
+    """Pass the real client IP to the local PicoLimbo lobby."""
     with _lock:
         rows = _pending_read()
         rows[name.lower()] = (ip, int(time.time()))
@@ -324,11 +338,16 @@ def _fingerprint_public(entry: dict) -> dict:
     }
 
 
-def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> None:
-    """Merge one proxy capture into the player's current session fingerprint.
+def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
+                       bind: bool = True) -> None:
+    """Merge one proxy capture into the player's client fingerprint.
 
     Entries are keyed by player name and only shown while the stored IP matches
     the active session.  Password material is never involved.
+
+    ``bind`` is true for a connection to the actual game server.  Lobby
+    captures (``bind=False``) are informational only: the lobby is a different
+    server, so its plugin-message set must never invalidate a valid session.
     """
     if not name or not snapshot:
         return
@@ -337,6 +356,18 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> Non
         data = _fingerprints_read()
         key = name.lower()
         old = data.get(key)
+        session_row = _read().get(key)
+        bound_hash = session_row[5].strip() if session_row and len(session_row) > 5 else ""
+        if not bind and bound_hash:
+            # Once a target-server capture is bound, it is authoritative. A
+            # lobby visit must not mix the lobby's different channel set into
+            # the entry, because that would change the hash and invalidate a
+            # perfectly valid session on the next connection.
+            return
+        # A newly registered/logged-in account has no binding yet. Do not
+        # merge the previous client's channels into the new base fingerprint.
+        if bind and session_row and not bound_hash:
+            old = {}
         if (not old or (FINGERPRINT_TTL and now - int(old.get("updated_at", 0)) > FINGERPRINT_TTL)
                 or _norm_ip(old.get("ip", "")) != _norm_ip(ip)):
             old = {}
@@ -388,11 +419,22 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> Non
                           reverse=True)[:FINGERPRINT_LIMIT]
             data = dict(keep)
         _fingerprints_write(data)
+        if not bind:
+            return
         sessions = _read()
         session = sessions.get(key)
         if session and _norm_ip(session[3]) == _norm_ip(ip) and _expiry(session) > now:
-            old_hash = session[5] if len(session) > 5 else ""
+            old_hash = session[5].strip() if len(session) > 5 else ""
             if old_hash and old_hash != entry["hash"]:
+                # The panel deliberately exposes only the hash inputs, never
+                # packet payloads. This log makes false positives diagnosable:
+                # a stable client must keep the same protocol, brand and channels.
+                log.info(
+                    "Auth %s: fingerprint changed (protocol %s->%s, brand %r->%r, channels %s->%s)",
+                    name, old.get("protocol"), protocol, old.get("brand"), brand,
+                    sorted(m.get("channel", "") for m in old.get("plugin_messages") or []),
+                    sorted(messages),
+                )
                 session[4] = "0"
                 if len(session) > 5:
                     session[5] = ""

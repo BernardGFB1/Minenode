@@ -7,8 +7,9 @@ It reads `routes.properties` from its Geyser data folder
 Bedrock player typed, and sets that server's online/offline authentication mode on each
 `SessionLoginEvent`. Unknown or disabled hosts are rejected with a friendly message.
 
-The extension is compiled ahead of time so the Docker image does not need a JDK at runtime. The
-committed `MineNodeRouter.jar` must be rebuilt whenever the Java sources change.
+The extension is compiled during the Docker build (and can be rebuilt locally with the scripts
+below), so the runtime image does not need a JDK. The committed `MineNodeRouter.jar` is only a
+development convenience; the image never uses it.
 
 ## Build (Windows)
 

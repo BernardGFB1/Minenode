@@ -27,8 +27,8 @@
             </div>
             <div class="flow-step">
               <span class="step-num">2</span>
-              <div><b>{{ $t('Bez sesji gracz trafia do ukrytego lobby Paper.') }}</b>
-                <div class="small text-2">{{ $t('Lobby działa w pustym świecie w trybie spectator i nie zajmuje miejsca na serwerze docelowym. Wydajność i zgodność wersji zapewniają ViaVersion, ViaBackwards i ViaRewind.') }}</div></div>
+              <div><b>{{ $t('Bez sesji gracz trafia do ukrytego lobby PicoLimbo.') }}</b>
+                <div class="small text-2">{{ $t('Lobby działa jako lekki serwer Rust w trybie spectator i nie zajmuje miejsca na serwerze docelowym. PicoLimbo obsługuje wiele wersji Minecraft natywnie.') }}</div></div>
             </div>
             <div class="flow-step">
               <span class="step-num">3</span>

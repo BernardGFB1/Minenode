@@ -26,7 +26,11 @@ import zlib
 
 MAX_FRAME = 2 * 1024 * 1024
 MAX_DECOMPRESSED = 2 * 1024 * 1024
-MAX_SNIFF_SECONDS = 30 * 60
+# Only the join/configuration burst is used for the fingerprint.  Gameplay
+# plugin messages (voice chat, server-side mods, …) must never become part of
+# the authentication hash: they differ between the lobby and the target server
+# and would invalidate an otherwise valid session.
+CAPTURE_SECONDS = 15
 MAX_PLUGIN_CHANNELS = 32
 MAX_PLUGIN_PAYLOAD = 1024 * 1024
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
@@ -219,16 +223,17 @@ def _candidate_bodies(body: bytes):
 
 
 class PacketSniffer:
-    """Buffer a bounded client stream and analyse it when the connection ends.
+    """Buffer the initial client burst and analyse it once at the session boundary.
 
-    The proxy must still frame packets while data is flowing, but deliberately
-    does not parse or persist every packet in the hot path.  Complete frame
-    bodies are kept in memory up to MAX_CAPTURE_BYTES and are analysed once by
-    ``flush``.  This makes setting changes made during a session visible while
-    avoiding repeated JSON writes and packet parsing during gameplay.
+    Only data from the first ``CAPTURE_SECONDS`` of a connection is inspected.
+    That window covers login/configuration (Client Information, brand and mod
+    channel announcements) but stops before normal gameplay.  The fingerprint
+    is therefore stable across a lobby visit and a later target-server join,
+    and gameplay plugin messages cannot force an unnecessary re-login.
     """
 
-    def __init__(self, protocol: int = -1, on_capture=None):
+    def __init__(self, protocol: int = -1, on_capture=None,
+                 capture_seconds: float = CAPTURE_SECONDS):
         self.protocol = protocol
         self.client_info: dict | None = None
         self.plugin_messages: dict[str, dict] = {}
@@ -239,18 +244,18 @@ class PacketSniffer:
         self.captured_at: int | None = None
         self.active = True
         self.buffer = bytearray()
+        self.capture_seconds = capture_seconds
         self._started = time.monotonic()
         self._on_capture = on_capture
         self._frames: list[bytes] = []
         self._analysed = False
-        self._initial_analysed = False
 
     def feed(self, data: bytes) -> None:
         """Feed raw bytes from the client → server direction."""
         if not self.active or not data:
             return
-        if time.monotonic() - self._started > MAX_SNIFF_SECONDS:
-            self.active = False
+        if self._expired():
+            self.freeze()
             return
         self.buffer.extend(data)
         try:
@@ -258,6 +263,11 @@ class PacketSniffer:
         except Exception:  # noqa: BLE001 – sniffing must never affect the proxy
             self.active = False
             self.buffer.clear()
+        if self.active and self._expired():
+            self.freeze()
+
+    def _expired(self) -> bool:
+        return time.monotonic() - self._started >= self.capture_seconds
 
     def _drain(self) -> None:
         while self.active:
@@ -344,24 +354,40 @@ class PacketSniffer:
             self._inspect(chosen)
         self._frames.clear()
 
-    def analyse_initial(self) -> None:
-        """Analyse only the initial burst, once the player enters the game."""
-        if self._initial_analysed:
-            return
-        self._initial_analysed = True
-        self._analyse_buffer()
-        if self._on_capture is not None:
-            try:
-                self._on_capture(self.snapshot())
-            except Exception:  # noqa: BLE001
-                pass
-
-    def flush(self) -> None:
-        """Analyse and persist the remaining capture at connection close."""
+    def freeze(self) -> None:
+        """Stop capturing and persist the initial/configuration fingerprint once."""
         if self._analysed:
             return
+        if self.active:
+            # Consume any complete frames that arrived before the deadline,
+            # then discard a partial trailing frame.
+            try:
+                self._drain()
+            except Exception:  # noqa: BLE001
+                pass
+        self.active = False
+        self.buffer.clear()
+        try:
+            self._analyse_buffer()
+        except Exception:  # noqa: BLE001 – sniffing must never affect the proxy
+            pass
         self._analysed = True
-        self._analyse_buffer()
+        self._notify()
+
+    def flush(self) -> None:
+        """Analyse and persist the capture if the connection ended early."""
+        if self._analysed:
+            return
+        self.active = False
+        self.buffer.clear()
+        try:
+            self._analyse_buffer()
+        except Exception:  # noqa: BLE001 – sniffing must never affect the proxy
+            pass
+        self._analysed = True
+        self._notify()
+
+    def _notify(self) -> None:
         if self._on_capture is not None:
             try:
                 self._on_capture(self.snapshot())

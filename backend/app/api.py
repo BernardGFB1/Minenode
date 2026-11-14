@@ -416,7 +416,7 @@ class CreateSettings(BaseModel):
     online_mode: bool = True
     max_players: int = Field(default=20, ge=1, le=1000)
     whitelist: bool = False
-    auth_enabled: bool = True  # MineNodeAuth login when online-mode is off
+    auth_enabled: bool = True  # MineNodeAuth/PicoLimbo login when online-mode is off
     bedrock: bool = False
     gamemode: Literal["survival", "creative", "adventure", "spectator"] = "survival"
     difficulty: Literal["peaceful", "easy", "normal", "hard"] = "easy"

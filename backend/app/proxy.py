@@ -250,7 +250,7 @@ class MinecraftProxy:
         target = inst
         auth_name, auth_ip = None, None
         lobby = getattr(self.m, "auth_lobby", None)
-        # Offline-mode servers use the hidden Paper lobby. Online-mode servers
+        # Offline-mode servers use the hidden PicoLimbo lobby. Online-mode servers
         # retain Mojang's normal authentication and do not pass through it.
         if player and not inst.online_mode and getattr(inst.cfg, "auth_enabled", True):
             auth_ip = str(peer[0])
@@ -414,7 +414,7 @@ class MinecraftProxy:
                         await writer.drain()
             else:
                 template = {"waking": s.kick_waking, "starting": s.kick_starting,
-                            "auth": "§eTen serwer wymaga logowania. Połącz się ponownie, aby się zarejestrować lub zalogować."}.get(
+                            "auth": "Ten serwer wymaga logowania. Połącz się ponownie, aby się zarejestrować lub zalogować."}.get(
                     mode, s.kick_offline if inst else "§cNieznany serwer: {name}")
                 msg = {"text": self.render(template, inst, hostname)}
                 writer.write(packet(0, mc_string(json.dumps(msg, ensure_ascii=False))))
@@ -474,18 +474,19 @@ class MinecraftProxy:
             self.sessions.setdefault(sid, {})[key] = sock
 
         sniffer = None
-        initial_capture_done = False
         if auth_name and auth_ip:
             from .fingerprint import PacketSniffer
             from .auth_sessions import record_fingerprint
 
             def capture(snapshot: dict) -> None:
-                record_fingerprint(auth_name, auth_ip, protocol, snapshot)
+                # Only a connection to the real game server establishes or
+                # invalidates the session binding. The hidden lobby is a
+                # different server and must never invalidate a fresh session.
+                record_fingerprint(auth_name, auth_ip, protocol, snapshot, bind=track)
 
             sniffer = PacketSniffer(protocol, on_capture=capture)
 
         async def copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, up: bool) -> None:
-            nonlocal initial_capture_done
             try:
                 while True:
                     data = await src.read(65536)
@@ -494,14 +495,9 @@ class MinecraftProxy:
                     if up:
                         self.bytes_up += len(data)
                         if sniffer is not None:
+                            # The sniffer captures only the join/configuration
+                            # window and persists exactly one fingerprint.
                             sniffer.feed(data)
-                            if not initial_capture_done:
-                                # The first client burst contains the login /
-                                # configuration information. Analyse that
-                                # small burst immediately; the rest is kept
-                                # cheap and analysed only on disconnect.
-                                sniffer.analyse_initial()
-                                initial_capture_done = True
                     else:
                         self.bytes_down += len(data)
                     dst.write(data)

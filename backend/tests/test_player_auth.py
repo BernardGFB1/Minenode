@@ -1,7 +1,5 @@
 """Tests for game-account authentication storage and panel management endpoints."""
 import time
-import zipfile
-from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -214,6 +212,116 @@ def test_changed_stable_fingerprint_invalidates_session_but_keeps_password():
     assert auth_sessions.set_password("Steve", "replacement-password")
 
 
+def test_successful_login_rebinds_fingerprint_without_invalidating_the_new_session():
+    row = put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+
+    # Rust /login refreshes expiry and clears the old fingerprint binding.
+    row[4] = str(int(time.time()) + auth_sessions.SESSION_TTL)
+    row.append("")
+    auth_sessions.SESSION_FILE.write_text("\t".join(row) + "\n", encoding="utf-8")
+
+    # The first capture after login belongs to the new session and must be
+    # accepted as its baseline, even when it differs from the pre-login capture.
+    auth_sessions.record_fingerprint(
+        "Steve", "203.0.113.7", 769, fingerprint_snapshot(channel="fabric:registry/sync"))
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+    assert auth_sessions.sessions()[0]["name"] == "Steve"
+
+
+def test_valid_does_not_adopt_a_capture_and_target_capture_fills_the_empty_column():
+    put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
+    expected = auth_sessions.fingerprint("Steve")["hash"]
+
+    row = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").strip().split("\t")
+    assert len(row) == 6
+    row[5] = ""
+    auth_sessions.SESSION_FILE.write_text("\t".join(row) + "\n", encoding="utf-8")
+
+    # Validating a session never binds the fingerprint itself: the stored entry
+    # may belong to the lobby or to a previous client.
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+    after_valid = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").splitlines()[0].split("\t")
+    assert len(after_valid) == 6
+    assert after_valid[5] == ""
+
+    # The first target-server capture establishes the binding in place.
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
+    after_capture = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").splitlines()[0].split("\t")
+    assert len(after_capture) == 6
+    assert after_capture[5] == expected
+
+
+def test_lobby_capture_never_invalidates_or_binds_the_session():
+    row = put_row()
+    assert len(row) == 5
+
+    # The hidden auth lobby is a different server: its plugin-message layout
+    # must not invalidate the session that was just created there.
+    auth_sessions.record_fingerprint(
+        "Steve", "203.0.113.7", 769, fingerprint_snapshot(channel="minecraft:register"), bind=False)
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+    stored = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").strip().split("\t")
+    assert len(stored) == 5
+
+    # A later lobby capture with a different hash still leaves the session alone.
+    auth_sessions.record_fingerprint(
+        "Steve", "203.0.113.7", 769, fingerprint_snapshot(channel="lobby:hello"), bind=False)
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+    assert auth_sessions.sessions()[0]["name"] == "Steve"
+
+
+def test_lobby_capture_does_not_corrupt_a_bound_target_fingerprint():
+    put_row()
+    target = fingerprint_snapshot(channel="fabric:registry/sync")
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, target)
+    bound = auth_sessions.fingerprint("Steve")["hash"]
+
+    # The next visit starts in the lobby before the session is validated.
+    # Its different channel set must neither change the stored hash nor
+    # invalidate the session.
+    auth_sessions.record_fingerprint(
+        "Steve", "203.0.113.7", 769, fingerprint_snapshot(channel="lobby:hello"), bind=False)
+
+    assert auth_sessions.fingerprint("Steve")["hash"] == bound
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+    assert auth_sessions.sessions()[0]["name"] == "Steve"
+
+
+def test_target_capture_establishes_the_session_binding_once():
+    row = put_row()
+    assert len(row) == 5
+
+    target = fingerprint_snapshot(channel="fabric:registry/sync")
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, target)
+    expected = auth_sessions.fingerprint("Steve")["hash"]
+    stored = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").strip().split("\t")
+    assert len(stored) == 6
+    assert stored[5] == expected
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+
+    # A changed stable client on the target server must require a re-login.
+    auth_sessions.record_fingerprint(
+        "Steve", "203.0.113.7", 769, fingerprint_snapshot(channel="other:mod"))
+    assert not auth_sessions.valid("Steve", "203.0.113.7")
+    assert auth_sessions.sessions() == []
+
+
+def test_changed_fingerprint_keeps_captured_details_available_to_the_panel():
+    put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
+    auth_sessions.record_fingerprint(
+        "Steve", "203.0.113.7", 769, fingerprint_snapshot(channel="fabric:registry/sync"))
+
+    assert not auth_sessions.valid("Steve", "203.0.113.7")
+    captured = auth_sessions.fingerprint("Steve")
+    assert captured is not None
+    assert {m["channel"] for m in captured["plugin_messages"]} == {
+        "minecraft:brand", "fabric:registry/sync"}
+
+
 def test_session_detail_endpoint_returns_fingerprint_but_never_password_material():
     put_row()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
@@ -275,14 +383,3 @@ def test_logout_and_password_change_keep_the_fingerprint_until_account_removal()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
     auth_sessions.delete_account("steve")
     assert auth_sessions.fingerprint("steve") is None
-
-
-def test_java_plugin_is_create_only_and_supports_fingerprint_column():
-    root = Path(__file__).parents[1] / "auth_plugin"
-    source = (root / "src/pl/minenode/auth/MineNodeAuth.java").read_text(encoding="utf-8")
-    assert "accountExists(name)" in source
-    assert "r.length >= 5" in source
-    assert "old[1] = replacement[1]" not in source
-    assert "old[2] = replacement[2]" not in source
-    with zipfile.ZipFile(root / "MineNodeAuth.jar") as jar:
-        assert "pl/minenode/auth/MineNodeAuth.class" in jar.namelist()

@@ -4,6 +4,7 @@
 **/*.pyc
 **/.venv
 **/.DS_Store
+**/.git
+backend/picolimbo/target
 /data/
-.git
 .dev-credentials.txt
