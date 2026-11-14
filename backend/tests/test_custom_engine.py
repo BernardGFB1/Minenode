@@ -74,3 +74,22 @@ def test_create_and_reinstall_requests_accept_the_custom_engine():
     assert api.CreateServer(name="Magma", type="custom", mc_version="1.20.1").type == "custom"
     for engine in providers.ENGINES:  # every engine in the wizard must be accepted by the API
         api.CreateServer(name="x", type=engine, mc_version="1.20.1")
+
+
+def test_server_java_is_on_path_for_launchers(tmp_path, monkeypatch):
+    """Launcher JARs (e.g. MythosCore) start `java` again by name – it must resolve to the panel's Java."""
+    import os
+    import shutil
+    from app.manager import server_env
+    java = tmp_path / "temurin-21" / "jdk-21" / "bin" / "java"
+    java.parent.mkdir(parents=True)
+    java.write_text("#!/bin/sh\n")
+    java.chmod(0o755)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    env = server_env(str(java))
+    assert env["PATH"].split(os.pathsep)[0] == str(java.parent)
+    assert env["JAVA_HOME"] == str(java.parent.parent)
+    assert shutil.which("java", path=env["PATH"]) == str(java)
+    assert env["TERM"] == "xterm-256color"
+    # a bare command name (no bin/ folder) leaves PATH alone
+    assert server_env("java")["PATH"] == "/usr/bin:/bin"

@@ -28,6 +28,19 @@ from .store import JsonStore
 log = logging.getLogger("minenode")
 
 DEFAULT_ICON = Path(__file__).resolve().parent / "assets" / "server-icon.png"
+
+
+def server_env(java: str | Path) -> dict[str, str]:
+    """Environment for a server process: the chosen Java is also `java` on PATH and JAVA_HOME.
+
+    Launchers (custom JARs, some hybrids, start scripts) run `java` again as a child process and
+    look it up on PATH; inside the container the panel's Temurin is not on PATH otherwise."""
+    env = {**os.environ, "TERM": "xterm-256color"}
+    bin_dir = Path(java).parent
+    if bin_dir.name == "bin" and (bin_dir / Path(java).name).exists():
+        env["PATH"] = os.pathsep.join([str(bin_dir), env.get("PATH", "")]).rstrip(os.pathsep)
+        env["JAVA_HOME"] = str(bin_dir.parent)
+    return env
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 CTRL_RE = re.compile(r"\x1b\[[0-9;?]*[ABCDEFGHJKSTfhlnsu]|\x1b\][^\x07]*\x07|\r")
 NAME = r"([A-Za-z0-9_]{1,16})"
@@ -462,7 +475,7 @@ class ServerInstance:
                     *cmd, cwd=str(self.dir),
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                     limit=1024 * 1024, start_new_session=True,
-                    env={**os.environ, "TERM": "xterm-256color"},
+                    env=server_env(cmd[0]),
                 )
             except Exception as exc:
                 self.panel_log(f"Nie udało się uruchomić: {exc}")
