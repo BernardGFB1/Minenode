@@ -112,7 +112,13 @@ Authentication is managed in the **Autoryzacja** tab (above Settings). It explai
 
 The proxy passively inspects offline-mode authentication sessions and stores an informational fingerprint from the first 15 seconds of a connection (login and configuration, before normal gameplay): Client Information (locale, view distance, chat and skin settings, main hand), the client brand and announced Plugin Message channel names with sizes and SHA-256 digests. Gameplay packets, chat, movement and inventory data are not stored. The hidden lobby is a different server, so its capture is informational only; the first capture from the actual game server binds the session. Only stable values (protocol, brand and channel names) are used in the session hash, so changing render distance, chat mode or skin visibility does not require a new login. A changed stable fingerprint invalidates the session and requires login again. Fingerprints are retained without automatic expiry until the account is removed.
 
-Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials, sessions and fingerprints are stored under `auth/`. The PicoLimbo authentication module is compiled into the image and changes passwords only through the panel API.
+Sessions last 30 minutes from the last entry or exit and are bound to both player name and IP address. A login from another IP requires authentication again. The lobby is managed by MineNode and starts automatically; its files live under `auth-lobby/`, while credentials, sessions and fingerprints are stored under `auth/`. The PicoLimbo authentication module changes passwords only through the panel API.
+
+#### Where PicoLimbo comes from and how it updates
+
+The lobby runs [PicoLimbo](https://github.com/Quozul/PicoLimbo) with MineNode's `/login` and `/register` module. The module is a small patch (`picolimbo/minenode-auth.patch`), not a copy of PicoLimbo's source. The GitHub Actions workflow `.github/workflows/picolimbo.yml` checks daily for a new upstream PicoLimbo release, applies the patch, builds static Linux binaries (x86_64 and ARM64) and publishes them as a `picolimbo-…` release of this repository. It also runs when the patch changes, and can be started by hand (**Actions → PicoLimbo for MineNode → Run workflow**).
+
+The panel downloads the newest of these releases on first start (SHA-256 verified) into `auth-lobby/bin/`, checks for a newer one every 6 hours and restarts the lobby with it; players in the lobby at that moment just reconnect. The **Autoryzacja** tab shows the installed version and has a *Check for a PicoLimbo update* button. If the patch no longer applies to a new upstream version, the workflow fails and panels simply keep the version they have.
 
 ### Portable server packages
 
@@ -177,6 +183,9 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `MINENODE_DATA` | `/data` | Data directory |
 | `MINENODE_ADMIN_USER` / `MINENODE_ADMIN_PASSWORD` | – | Account created on first start (instead of the wizard) |
 | `MINENODE_SECURE_COOKIES` | `false` | Send session cookies over HTTPS only |
+| `MINENODE_PICOLIMBO_REPO` | `BernardGFB1/Minenode` | GitHub repository whose `picolimbo-…` releases provide the authentication lobby |
+| `MINENODE_PICOLIMBO_BINARY` | – | Run this local PicoLimbo binary instead of downloading one (no automatic updates) |
+| `GITHUB_TOKEN` | – | Optional token for the GitHub API (only needed behind a shared IP that hits GitHub's rate limit) |
 | `MINENODE_TRUSTED_PROXIES` | `127.0.0.1` | Reverse proxies allowed to set `X-Forwarded-For` (comma-separated IPs or CIDR ranges, e.g. `172.16.0.0/12`). Used for the client IP in the login limit |
 | `CURSEFORGE_API_KEY` | – | CurseForge API key |
 | `PUID` / `PGID` | `1000` | User the panel and servers run as |
@@ -213,6 +222,7 @@ Some authors block API downloads of their files. MineNode lists those files in t
 | `fingerprint.py` | Passive Client Information / Plugin Message sniffer and version-tolerant packet framing used by the session fingerprint |
 | `auth_sessions.py` | Shared player account, session and fingerprint storage used by the proxy and the PicoLimbo lobby |
 | `auth_lobby.py` | Hidden PicoLimbo authentication lobby lifecycle |
+| `picolimbo.py` | Downloads the PicoLimbo build from GitHub releases and keeps it up to date |
 | `voice.py` | UDP proxy for Simple Voice Chat (routing by player UUID) and SVC config management |
 | `bedrock.py` | Shared Geyser Bedrock gateway: downloads Geyser, generates `config.yml` and hostname routes, manages the process and global auth mode. `backend/bedrock_ext/` is the bundled MineNodeRouter extension that resolves each Bedrock hostname (compiled during the Docker build) |
 | `providers.py` | Version discovery and engine installation (incl. Forge/NeoForge/Quilt installers) |

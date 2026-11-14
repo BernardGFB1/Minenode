@@ -47,7 +47,19 @@
             <div><span class="muted small">{{ $t('Port wewnętrzny lobby:') }}</span><span class="mono">{{ lobby?.port || '—' }}</span></div>
             <div><span class="muted small">{{ $t('Czas sesji') }}</span><span>{{ lobby?.session_minutes || 30 }} min</span></div>
             <div><span class="muted small">{{ $t('Zarejestrowani gracze') }}</span><span>{{ playerAccounts.length }}</span></div>
+            <div v-if="pico"><span class="muted small">PicoLimbo</span>
+              <span>
+                <span class="mono">{{ pico.version || '—' }}</span>
+                <span v-if="pico.latest && pico.latest !== pico.version" class="badge amber" style="margin-left: 6px">{{ $t('dostępna {v}', { v: pico.latest }) }}</span>
+                <span v-if="pico.checked_at" class="tiny muted" style="margin-left: 6px">· {{ $t('sprawdzono {when}', { when: timeAgo(pico.checked_at) }) }}</span>
+              </span>
+            </div>
           </div>
+          <div v-if="pico && pico.source === 'github'" class="row wrap" style="gap: 8px; align-items: center">
+            <button class="btn sm" :disabled="updating" @click="checkUpdate"><Loader2 v-if="updating" class="spin" /><RotateCcw v-else /> {{ $t('Sprawdź aktualizację PicoLimbo') }}</button>
+            <span class="tiny muted">{{ $t('Panel pobiera PicoLimbo z modułem logowania z GitHuba ({repo}) i sam sprawdza nowe wersje co 6 godzin.', { repo: pico.repo }) }}</span>
+          </div>
+          <div v-if="pico?.error" class="callout warn small"><Info />{{ $tm(pico.error) }}</div>
 
           <div class="callout info small"><Info /><div>
             {{ $t('Hasła są przechowywane jako PBKDF2-HMAC-SHA256 (120 000 iteracji) i nigdy nie są pokazywane w panelu ani zwracane przez API. Usunięcie hasła pozwala graczowi zarejestrować się ponownie.') }}
@@ -226,10 +238,21 @@ import Modal from '../components/Modal.vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import { confirmDialog, toast, toastError } from '../store'
-import { copyText, formatBytes, formatDate } from '../utils'
+import { copyText, formatBytes, formatDate, timeAgo } from '../utils'
 
 const loading = ref(false)
 const lobby = ref(null)
+const pico = computed(() => lobby.value?.picolimbo || null)
+const updating = ref(false)
+async function checkUpdate() {
+  updating.value = true
+  try {
+    const r = await api.post('/player-auth/lobby/update')
+    if (lobby.value) lobby.value = { ...lobby.value, picolimbo: r.picolimbo, running: r.running, error: r.error }
+    if (r.picolimbo?.error) toast(r.picolimbo.error, 'error', 6000)
+    else toast(r.updated ? t('Zaktualizowano PicoLimbo do {v} – lobby uruchomione ponownie', { v: r.picolimbo.version }) : t('PicoLimbo jest aktualne'), 'success', 3500)
+  } catch (e) { toastError(e) } finally { updating.value = false }
+}
 const playerSessions = ref([])
 const playerAccounts = ref([])
 const sessionSearch = ref('')

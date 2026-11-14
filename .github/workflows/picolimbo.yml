@@ -1,0 +1,104 @@
+# Builds PicoLimbo (https://github.com/Quozul/PicoLimbo) with MineNode's login module and publishes it
+# as a GitHub release of this repository. MineNode panels download the newest "picolimbo-*" release
+# and update themselves, so a new upstream PicoLimbo version reaches every panel without a new image.
+#
+# Runs daily (new upstream release?), when the patch changes, or by hand ("Run workflow"; tick
+# "force" to rebuild an existing release).
+name: PicoLimbo for MineNode
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "picolimbo/**"
+      - ".github/workflows/picolimbo.yml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if this version is already released
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: picolimbo-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream: ${{ steps.v.outputs.upstream }}
+      tag: ${{ steps.v.outputs.tag }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          upstream=$(gh api repos/Quozul/PicoLimbo/releases/latest --jq .tag_name)
+          # The patch version is part of the tag: changing the login module publishes a new release too.
+          patch=$(cat picolimbo/minenode-auth.patch picolimbo/build.sh | sha256sum | cut -c1-8)
+          tag="picolimbo-${upstream}-${patch}"
+          build=true
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && [ "$FORCE" != "true" ]; then
+            build=false
+          fi
+          echo "PicoLimbo $upstream, release $tag, build=$build"
+          { echo "upstream=$upstream"; echo "tag=$tag"; echo "build=$build"; } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install musl-tools
+        run: sudo apt-get update -y && sudo apt-get install -y musl-tools
+      - name: Build
+        run: sh picolimbo/build.sh "${{ needs.check.outputs.upstream }}" "${{ matrix.target }}" out
+      - name: Package
+        run: |
+          name="pico_limbo-linux-${{ matrix.arch }}-musl.tar.gz"
+          tar -C out -czf "$name" pico_limbo
+          sha256sum "$name" > "$name.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pico_limbo-${{ matrix.arch }}
+          path: pico_limbo-linux-*
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          UPSTREAM: ${{ needs.check.outputs.upstream }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+              --title "PicoLimbo $UPSTREAM for MineNode" \
+              --notes "PicoLimbo $UPSTREAM (https://github.com/Quozul/PicoLimbo) with MineNode's /login and /register module (picolimbo/minenode-auth.patch). Downloaded and updated automatically by MineNode panels."
+          fi

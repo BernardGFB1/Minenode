@@ -7,12 +7,6 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-# ---------------------------------------------------------------- PicoLimbo authentication lobby
-FROM rust:1.89-bookworm AS picolimbo
-WORKDIR /picolimbo
-COPY backend/picolimbo/ ./
-RUN cargo build --release -p pico_limbo
-
 # ---------------------------------------------------------------- Bedrock router extension (Java)
 # The extension is compiled here, not in the runtime image and not taken from
 # the repository: a stale committed JAR must never hide broken Java sources.
@@ -53,7 +47,6 @@ WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY backend/app ./app
-COPY --from=picolimbo /picolimbo/target/release/pico_limbo ./picolimbo-bin/pico_limbo
 COPY --from=bedrock_ext /ext/MineNodeRouter.jar ./bedrock_ext/MineNodeRouter.jar
 COPY --from=web /web/dist ./static
 COPY docker/entrypoint.sh /entrypoint.sh

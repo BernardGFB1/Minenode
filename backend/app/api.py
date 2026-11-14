@@ -159,6 +159,16 @@ async def remove_user(username: str, me: str = Depends(auth.require_user)):
 
 # ====================================================================== player authentication
 
+@router.post("/player-auth/lobby/update")
+async def player_auth_lobby_update(_: str = Depends(auth.require_user)):
+    """Check GitHub for a newer PicoLimbo now (normally every few hours) and switch to it."""
+    lobby = getattr(manager, "auth_lobby", None)
+    if lobby is None:
+        raise HTTPException(503, "Lobby autoryzacji nie działa")
+    changed = await lobby.check_for_update()
+    return {"updated": changed, "running": lobby.running, "error": lobby.error, "picolimbo": lobby.updater.status()}
+
+
 @router.get("/player-auth/sessions")
 async def player_auth_sessions(q: str = "", _: str = Depends(auth.require_user)):
     """Active game logins. Passwords and hashes are never returned."""
@@ -287,6 +297,7 @@ async def get_settings(_: str = Depends(auth.require_user)):
         "error": lobby.error if lobby else None,
         "port": getattr(lobby, "port", None),
         "session_minutes": 30,
+        "picolimbo": lobby.updater.status() if lobby else None,
     }
     return d
 
