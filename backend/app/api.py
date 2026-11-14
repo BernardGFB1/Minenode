@@ -191,6 +191,14 @@ async def player_auth_accounts(q: str = "", _: str = Depends(auth.require_user))
     return auth_sessions.accounts(q)
 
 
+@router.get("/player-auth/accounts/{name}")
+async def player_auth_account(name: str, _: str = Depends(auth.require_user)):
+    detail = auth_sessions.account_detail(name)
+    if detail is None:
+        raise HTTPException(404, "Nie znaleziono zarejestrowanego gracza")
+    return detail
+
+
 class PlayerPasswordBody(BaseModel):
     password: str = Field(min_length=auth_sessions.PASSWORD_MIN_LENGTH, max_length=128)
 

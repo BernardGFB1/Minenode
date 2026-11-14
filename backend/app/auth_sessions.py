@@ -27,8 +27,10 @@ PENDING_FILE = DATA_DIR / "auth" / "pending.db"
 FINGERPRINT_FILE = DATA_DIR / "auth" / "fingerprints.json"
 SESSION_TTL = 30 * 60
 PENDING_TTL = 30 * 60
-FINGERPRINT_TTL = 7 * 24 * 60 * 60
-FINGERPRINT_LIMIT = 1000
+# Fingerprints are retained until the account/session is explicitly cleared.
+# A zero value disables automatic age and count pruning.
+FINGERPRINT_TTL = 0
+FINGERPRINT_LIMIT = 0
 PASSWORD_ITERATIONS = 120_000
 PASSWORD_MIN_LENGTH = 6
 _lock = threading.RLock()
@@ -39,7 +41,7 @@ def _read() -> dict[str, list[str]]:
     try:
         for line in SESSION_FILE.read_text(encoding="utf-8").splitlines():
             parts = line.split("\t")
-            if len(parts) == 5 and parts[0]:
+            if len(parts) >= 5 and parts[0]:
                 out[parts[0].lower()] = parts
     except FileNotFoundError:
         pass
@@ -98,9 +100,21 @@ def _pending_write(rows: dict[str, tuple[str, int]]) -> None:
 
 def valid(name: str, ip: str) -> bool:
     with _lock:
-        row = _read().get(name.lower())
+        data = _read()
+        row = data.get(name.lower())
         if not row or _norm_ip(row[3]) != _norm_ip(ip):
             return False
+        current = _fingerprints_read().get(name.lower())
+        stored_hash = row[5] if len(row) > 5 else ""
+        current_hash = current.get("hash") if current else ""
+        if stored_hash and current_hash and stored_hash != current_hash:
+            row[4] = "0"
+            _write(data)
+            _fingerprint_delete(name)
+            return False
+        if not stored_hash and current_hash:
+            row.append(current_hash)
+            _write(data)
         return _expiry(row) > time.time()
 
 
@@ -160,6 +174,24 @@ def accounts(query: str = "") -> list[dict]:
     return out
 
 
+def account_detail(name: str) -> dict | None:
+    """Registered account details without password material."""
+    now = time.time()
+    with _lock:
+        row = _read().get(name.lower())
+        fingerprints = _fingerprints_read()
+    if not row:
+        return None
+    active = _expiry(row) > now
+    session = {"name": row[0], "ip": row[3], "expires_at": _expiry(row), "active": active}
+    return {
+        "session": session,
+        "fingerprint": _fingerprint_public(fingerprints[row[0].lower()])
+        if row[0].lower() in fingerprints
+        and _norm_ip(fingerprints[row[0].lower()].get("ip", "")) == _norm_ip(row[3]) else None,
+    }
+
+
 def clear_session(name: str) -> bool:
     """Log a player out while keeping their password for the next /login."""
     with _lock:
@@ -168,8 +200,9 @@ def clear_session(name: str) -> bool:
         if not row:
             return False
         row[4] = "0"
+        if len(row) > 5:
+            row[5] = ""
         _write(data)
-        _fingerprint_delete(name)
         return True
 
 
@@ -205,8 +238,9 @@ def set_password(name: str, password: str) -> bool:
         row[1] = salt
         row[2] = password_hash(password, salt)
         row[4] = "0"
+        if len(row) > 5:
+            row[5] = ""
         _write(data)
-        _fingerprint_delete(name)
         return True
 
 
@@ -238,11 +272,9 @@ def _fingerprint_hash(protocol: int | None, raw: dict | None, brand: str | None,
                       channels: list[str]) -> str:
     canonical = {
         "protocol": protocol,
-        "client_info": None if not raw else {
-            key: raw.get(key)
-            for key in ("locale", "view_distance", "chat_mode", "chat_colors", "skin_parts",
-                        "main_hand", "text_filtering", "allow_listings", "particle_status")
-        },
+        # Only values expected to remain stable across normal gameplay are
+        # bound to authentication. Client settings such as render distance,
+        # chat mode and skin visibility are intentionally excluded.
         "brand": brand or "",
         "channels": sorted(set(channels)),
     }
@@ -305,7 +337,7 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> Non
         data = _fingerprints_read()
         key = name.lower()
         old = data.get(key)
-        if (not old or now - int(old.get("updated_at", 0)) > FINGERPRINT_TTL
+        if (not old or (FINGERPRINT_TTL and now - int(old.get("updated_at", 0)) > FINGERPRINT_TTL)
                 or _norm_ip(old.get("ip", "")) != _norm_ip(ip)):
             old = {}
 
@@ -349,13 +381,28 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> Non
         }
         data[key] = entry
         for old_key, old_entry in list(data.items()):
-            if now - int(old_entry.get("updated_at", 0)) > FINGERPRINT_TTL:
+            if FINGERPRINT_TTL and now - int(old_entry.get("updated_at", 0)) > FINGERPRINT_TTL:
                 data.pop(old_key, None)
-        if len(data) > FINGERPRINT_LIMIT:
+        if FINGERPRINT_LIMIT and len(data) > FINGERPRINT_LIMIT:
             keep = sorted(data.items(), key=lambda item: int(item[1].get("updated_at", 0)),
                           reverse=True)[:FINGERPRINT_LIMIT]
             data = dict(keep)
         _fingerprints_write(data)
+        sessions = _read()
+        session = sessions.get(key)
+        if session and _norm_ip(session[3]) == _norm_ip(ip) and _expiry(session) > now:
+            old_hash = session[5] if len(session) > 5 else ""
+            if old_hash and old_hash != entry["hash"]:
+                session[4] = "0"
+                if len(session) > 5:
+                    session[5] = ""
+                _write(sessions)
+            else:
+                if len(session) > 5:
+                    session[5] = entry["hash"]
+                else:
+                    session.append(entry["hash"])
+                _write(sessions)
 
 
 def fingerprint(name: str, ip: str | None = None) -> dict | None:

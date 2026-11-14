@@ -157,9 +157,8 @@ def test_fingerprint_is_stable_merged_and_bound_to_the_session_ip():
     assert {m["channel"] for m in merged["plugin_messages"]} == {"minecraft:brand", "fabric:registry/sync"}
     assert auth_sessions.fingerprint("steve", "198.51.100.9") is None
 
-    [session] = auth_sessions.sessions()
-    assert session["fingerprint"]["hash"] == merged["hash"]
-    assert session["fingerprint"]["channels"] == 2
+    # A stable fingerprint change invalidates the session and requires login.
+    assert auth_sessions.sessions() == []
 
 
 def test_session_detail_endpoint_returns_fingerprint_but_never_password_material():
@@ -180,17 +179,17 @@ def test_session_detail_endpoint_returns_fingerprint_but_never_password_material
     assert client.get("/api/player-auth/sessions/nobody").status_code == 404
 
 
-def test_logout_password_change_and_account_removal_clear_the_fingerprint():
+def test_logout_and_password_change_keep_the_fingerprint_until_account_removal():
     put_row()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
     assert auth_sessions.fingerprint("steve")
     auth_sessions.clear_session("steve")
-    assert auth_sessions.fingerprint("steve") is None
+    assert auth_sessions.fingerprint("steve") is not None
 
     put_row()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
     auth_sessions.set_password("steve", "new-secret-password")
-    assert auth_sessions.fingerprint("steve") is None
+    assert auth_sessions.fingerprint("steve") is not None
 
     put_row()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())

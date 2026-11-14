@@ -109,7 +109,7 @@
           <table class="table">
             <thead><tr><th>{{ $t('Gracz') }}</th><th>{{ $t('Ostatni adres IP') }}</th><th>{{ $t('Status') }}</th><th /></tr></thead>
             <tbody>
-              <tr v-for="acc in filteredAccounts" :key="acc.name">
+              <tr v-for="acc in filteredAccounts" :key="acc.name" class="clickable" :title="$t('Kliknij, aby zobaczyć szczegóły sesji')" @click="openAccount(acc)">
                 <td><b>{{ acc.name }}</b></td>
                 <td class="mono small">{{ acc.ip || '—' }}</td>
                 <td>
@@ -137,7 +137,7 @@
           <div><span class="muted small">{{ $t('Gracz') }}</span><b>{{ detail.session.name }}</b></div>
           <div><span class="muted small">{{ $t('Adres IP') }}</span><span class="mono">{{ detail.session.ip }}</span></div>
           <div><span class="muted small">{{ $t('Sesja wygasa') }}</span><span>{{ formatDate(detail.session.expires_at) }}</span></div>
-          <div><span class="muted small">{{ $t('Status') }}</span><span class="badge green">{{ $t('zalogowany') }}</span></div>
+          <div><span class="muted small">{{ $t('Status') }}</span><span class="badge" :class="detail.session.active === false ? '' : 'green'">{{ detail.session.active === false ? $t('wymaga logowania') : $t('zalogowany') }}</span></div>
         </div>
 
         <template v-if="detail.fingerprint">
@@ -282,6 +282,18 @@ async function openSession(session) {
   detailLoading.value = true
   try {
     detail.value = await api.get(`/player-auth/sessions/${encodeURIComponent(session.name)}`)
+  } catch (e) {
+    detailError.value = e?.message || t('Nie udało się pobrać szczegółów sesji.')
+  } finally { detailLoading.value = false }
+}
+
+async function openAccount(account) {
+  detailName.value = account.name
+  detail.value = null
+  detailError.value = ''
+  detailLoading.value = true
+  try {
+    detail.value = await api.get(`/player-auth/accounts/${encodeURIComponent(account.name)}`)
   } catch (e) {
     detailError.value = e?.message || t('Nie udało się pobrać szczegółów sesji.')
   } finally { detailLoading.value = false }

@@ -841,7 +841,7 @@ const strings = {
   'Szczegóły sesji – {name}': 'Session details – {name}',
   'Ładowanie szczegółów…': 'Loading details…',
   'Odcisk klienta': 'Client fingerprint',
-  'Odcisk powstaje z ustawień klienta, marki oraz nazw kanałów Plugin Message. Jest liczony tylko informacyjnie – logowanie nie jest jeszcze blokowane na jego podstawie.': 'The fingerprint is built from client settings, brand and Plugin Message channel names. It is informational only – logins are not blocked on its basis yet.',
+  'Odcisk powstaje ze stabilnych danych klienta: protokołu, marki oraz nazw kanałów Plugin Message. Zmiana odcisku kończy sesję i wymaga ponownego logowania. Zmienne ustawienia, takie jak render distance, nie są używane w hash.': 'The fingerprint uses stable client data: protocol, brand and Plugin Message channel names. A fingerprint change ends the session and requires logging in again. Variable settings such as render distance are not included in the hash.',
   'Protokół': 'Protocol',
   'Ostatnia aktualizacja': 'Last update',
   'Przechwycone ramki': 'Captured frames',
