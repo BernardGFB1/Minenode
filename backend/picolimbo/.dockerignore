@@ -1,0 +1,10 @@
+/data/**
+!/data/generated
+!/data/generated/**
+/.git
+/.github
+/.idea
+/docs
+/pterodactyl
+/target
+/cache
