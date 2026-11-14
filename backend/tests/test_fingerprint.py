@@ -86,18 +86,22 @@ def test_parse_plugin_message_requires_a_channel_and_matching_payload_length():
 def test_sniffer_understands_plain_and_compressed_frames():
     plain = PacketSniffer(769)
     plain.feed(frame(varint(0) + client_info()))
+    assert plain.client_info is None  # deferred until the session boundary
+    plain.flush()
     assert plain.client_info["locale"] == "en_us"
 
     body = varint(0) + client_info()
     compressed_body = varint(len(body)) + zlib.compress(body)
     compressed = PacketSniffer(769)
     compressed.feed(frame(compressed_body))
+    compressed.flush()
     assert compressed.client_info["locale"] == "en_us"
 
     brand = mc_string("vanilla")
     plugin_body = varint(1) + mc_string("minecraft:brand") + varint(len(brand)) + brand
     plugin = PacketSniffer(769)
     plugin.feed(frame(plugin_body))
+    plugin.flush()
     assert plugin.brand == "vanilla"
     assert plugin.plugin_messages["minecraft:brand"]["count"] == 1
 
@@ -108,11 +112,13 @@ def test_sniffer_survives_malformed_and_split_frames():
     sniffer.feed(good[:3])
     assert sniffer.client_info is None
     sniffer.feed(good[3:])
+    sniffer.flush()
     assert sniffer.client_info["locale"] == "en_us"
 
     bad = PacketSniffer()
     bad.feed(varint(50) + b"\x00" * 50)  # complete garbage frame
     bad.feed(frame(varint(0) + client_info()))
+    bad.flush()
     assert bad.client_info["locale"] == "en_us"
 
 
@@ -129,10 +135,8 @@ def test_sniffer_coalesces_capture_writes_and_flushes_on_close(monkeypatch):
         sniffer.feed(frame(payload))
         now[0] += 0.05
 
-    assert len(snapshots) == 1  # login burst collapsed into one write
-    assert sniffer.plugin_messages["minecraft:brand"]["count"] == 20
     sniffer.flush()
-    assert len(snapshots) == 2
+    assert len(snapshots) == 1  # one analysis/write at the session boundary
     assert snapshots[-1]["plugin_messages"][0]["count"] == 20
 
 

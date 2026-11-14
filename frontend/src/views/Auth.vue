@@ -204,6 +204,7 @@
             </table>
             <div class="small text-2" style="margin-top: 8px">{{ $t('Treść pakietów nie jest zapisywana – panel pokazuje tylko nazwę kanału, rozmiar i skrót SHA-256.') }}</div>
           </div>
+
         </template>
         <div v-else class="callout info small"><Info /><div>
           {{ $t('Nie przechwycono jeszcze ustawień klienta dla tej sesji. Pojawią się po wejściu gracza na serwer lub do lobby autoryzacji.') }}

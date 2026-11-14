@@ -26,10 +26,10 @@ import zlib
 
 MAX_FRAME = 2 * 1024 * 1024
 MAX_DECOMPRESSED = 2 * 1024 * 1024
-MAX_SNIFF_SECONDS = 5 * 60
+MAX_SNIFF_SECONDS = 30 * 60
 MAX_PLUGIN_CHANNELS = 32
 MAX_PLUGIN_PAYLOAD = 1024 * 1024
-NOTIFY_INTERVAL = 1.5
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 
 _LOCALE_RE = re.compile(r"^[a-z]{2,3}(?:[_-][a-z0-9]{2,8})?$", re.IGNORECASE)
 _CHANNEL_RE = re.compile(r"^[A-Za-z0-9_|:./+-]{1,128}$")
@@ -219,7 +219,14 @@ def _candidate_bodies(body: bytes):
 
 
 class PacketSniffer:
-    """Passively collect Client Information and Plugin Message packets."""
+    """Buffer a bounded client stream and analyse it when the connection ends.
+
+    The proxy must still frame packets while data is flowing, but deliberately
+    does not parse or persist every packet in the hot path.  Complete frame
+    bodies are kept in memory up to MAX_CAPTURE_BYTES and are analysed once by
+    ``flush``.  This makes setting changes made during a session visible while
+    avoiding repeated JSON writes and packet parsing during gameplay.
+    """
 
     def __init__(self, protocol: int = -1, on_capture=None):
         self.protocol = protocol
@@ -227,13 +234,16 @@ class PacketSniffer:
         self.plugin_messages: dict[str, dict] = {}
         self.brand: str | None = None
         self.frames = 0
+        self.captured_bytes = 0
+        self.dropped_frames = 0
         self.captured_at: int | None = None
         self.active = True
         self.buffer = bytearray()
         self._started = time.monotonic()
         self._on_capture = on_capture
-        self._last_notify = 0.0
-        self._pending = False
+        self._frames: list[bytes] = []
+        self._analysed = False
+        self._initial_analysed = False
 
     def feed(self, data: bytes) -> None:
         """Feed raw bytes from the client → server direction."""
@@ -245,7 +255,6 @@ class PacketSniffer:
         self.buffer.extend(data)
         try:
             self._drain()
-            self._notify()
         except Exception:  # noqa: BLE001 – sniffing must never affect the proxy
             self.active = False
             self.buffer.clear()
@@ -264,8 +273,11 @@ class PacketSniffer:
             body = bytes(self.buffer[pos:pos + length])
             del self.buffer[:pos + length]
             self.frames += 1
-            for candidate in _candidate_bodies(body):
-                self._inspect(candidate)
+            if self.captured_bytes + len(body) <= MAX_CAPTURE_BYTES:
+                self._frames.append(body)
+                self.captured_bytes += len(body)
+            else:
+                self.dropped_frames += 1
 
     def _inspect(self, body: bytes) -> None:
         _, pos = _varint(body, 0)
@@ -293,8 +305,6 @@ class PacketSniffer:
                     info[key] = self.client_info[key]
         self.client_info = info
         self.captured_at = int(time.time())
-        self._pending = True
-        self._notify()
 
     def _add_plugin_message(self, channel: str, data: bytes) -> None:
         digest = hashlib.sha256(data).hexdigest()
@@ -313,27 +323,50 @@ class PacketSniffer:
         if brand and brand != self.brand:
             self.brand = brand
         self.captured_at = int(time.time())
-        self._pending = True
-        self._notify()
 
-    def _notify(self, force: bool = False) -> None:
-        if self._on_capture is None or not self._pending:
+    def _analyse_buffer(self) -> None:
+        for body in self._frames:
+            candidates = list(_candidate_bodies(body))
+            if not candidates:
+                continue
+            # Pick the candidate which has a valid packet payload.  The helper
+            # also yields a ``data_length == 0`` view for compressed streams;
+            # that view is not a packet and must not become packet ID metadata.
+            data_length, _ = _varint(body, 0)
+            chosen = candidates[-1] if data_length and len(candidates) > 1 else candidates[0]
+            for candidate in candidates:
+                _, pos = _varint(candidate, 0)
+                payload = candidate[pos:] if pos < len(candidate) else b""
+                if (parse_client_information(payload, self.protocol) is not None
+                        or parse_plugin_message(payload) is not None):
+                    chosen = candidate
+                    break
+            self._inspect(chosen)
+        self._frames.clear()
+
+    def analyse_initial(self) -> None:
+        """Analyse only the initial burst, once the player enters the game."""
+        if self._initial_analysed:
             return
-        now = time.monotonic()
-        # Login bursts deliver many plugin messages at once. Coalesce them so
-        # the proxy does not rewrite the fingerprint file for every packet.
-        if not force and now - self._last_notify < NOTIFY_INTERVAL:
-            return
-        self._pending = False
-        self._last_notify = now
-        try:
-            self._on_capture(self.snapshot())
-        except Exception:  # noqa: BLE001
-            pass
+        self._initial_analysed = True
+        self._analyse_buffer()
+        if self._on_capture is not None:
+            try:
+                self._on_capture(self.snapshot())
+            except Exception:  # noqa: BLE001
+                pass
 
     def flush(self) -> None:
-        """Persist a pending capture immediately (connection closed)."""
-        self._notify(force=True)
+        """Analyse and persist the remaining capture at connection close."""
+        if self._analysed:
+            return
+        self._analysed = True
+        self._analyse_buffer()
+        if self._on_capture is not None:
+            try:
+                self._on_capture(self.snapshot())
+            except Exception:  # noqa: BLE001
+                pass
 
     def snapshot(self) -> dict:
         return {
@@ -343,5 +376,7 @@ class PacketSniffer:
             ],
             "brand": self.brand,
             "frames": self.frames,
+            "captured_bytes": self.captured_bytes,
+            "dropped_frames": self.dropped_frames,
             "captured_at": self.captured_at or int(time.time()),
         }

@@ -284,6 +284,8 @@ def _fingerprint_public(entry: dict) -> dict:
         "updated_at": entry.get("updated_at"),
         "captured_at": entry.get("captured_at"),
         "frames": entry.get("frames", 0),
+        "captured_bytes": entry.get("captured_bytes", 0),
+        "dropped_frames": entry.get("dropped_frames", 0),
         "client_info": entry.get("client_info"),
         "brand": entry.get("brand"),
         "plugin_messages": entry.get("plugin_messages") or [],
@@ -314,6 +316,7 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> Non
             channel = message.get("channel")
             if channel:
                 messages[channel] = dict(message)
+
         for message in snapshot.get("plugin_messages") or []:
             channel = message.get("channel")
             if not channel:
@@ -339,6 +342,8 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict) -> Non
             "brand": brand,
             "plugin_messages": [messages[channel] for channel in sorted(messages, key=str.lower)],
             "frames": max(int(old.get("frames", 0)), int(snapshot.get("frames", 0))),
+            "captured_bytes": max(int(old.get("captured_bytes", 0)), int(snapshot.get("captured_bytes", 0))),
+            "dropped_frames": max(int(old.get("dropped_frames", 0)), int(snapshot.get("dropped_frames", 0))),
             "captured_at": snapshot.get("captured_at") or old.get("captured_at") or now,
             "updated_at": now,
         }

@@ -474,6 +474,7 @@ class MinecraftProxy:
             self.sessions.setdefault(sid, {})[key] = sock
 
         sniffer = None
+        initial_capture_done = False
         if auth_name and auth_ip:
             from .fingerprint import PacketSniffer
             from .auth_sessions import record_fingerprint
@@ -484,6 +485,7 @@ class MinecraftProxy:
             sniffer = PacketSniffer(protocol, on_capture=capture)
 
         async def copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, up: bool) -> None:
+            nonlocal initial_capture_done
             try:
                 while True:
                     data = await src.read(65536)
@@ -493,6 +495,13 @@ class MinecraftProxy:
                         self.bytes_up += len(data)
                         if sniffer is not None:
                             sniffer.feed(data)
+                            if not initial_capture_done:
+                                # The first client burst contains the login /
+                                # configuration information. Analyse that
+                                # small burst immediately; the rest is kept
+                                # cheap and analysed only on disconnect.
+                                sniffer.analyse_initial()
+                                initial_capture_done = True
                     else:
                         self.bytes_down += len(data)
                     dst.write(data)
