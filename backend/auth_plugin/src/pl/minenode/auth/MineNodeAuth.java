@@ -86,7 +86,12 @@ public final class MineNodeAuth extends JavaPlugin implements Listener {
             }
             synchronized (this) {
                 List<String[]> rows = read();
-                if (find(rows, name) != null) { p.sendMessage(ChatColor.RED + "Ten nick jest już zarejestrowany. Użyj /login."); return true; }
+                // Registration is create-only. Check the raw file as well as
+                // parsed rows so an extended/malformed record can never make
+                // an existing account look new and replace its password.
+                if (accountExists(name) || find(rows, name) != null) {
+                    p.sendMessage(ChatColor.RED + "Ten nick jest już zarejestrowany. Użyj /login."); return true;
+                }
                 String salt = bytes(16), hash = hash(args[0], salt);
                 rows.add(new String[]{name, salt, hash, ip, Long.toString(expiry())});
                 write(rows);
@@ -141,14 +146,31 @@ public final class MineNodeAuth extends JavaPlugin implements Listener {
     }
     private List<String[]> read() {
         List<String[]> out = new ArrayList<>();
-        try { for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) { String[] r = line.split("\\t", -1); if (r.length == 5) out.add(r); } }
+        // The sixth column is the optional MineNode client fingerprint hash.
+        // Keep it when reading/writing so the plugin remains compatible with
+        // sessions created before fingerprint binding was added.
+        try { for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) { String[] r = line.split("\\t", -1); if (r.length >= 5) out.add(r); } }
         catch (IOException ignored) { }
         return out;
     }
     private String[] find(List<String[]> rows, String name) { return rows.stream().filter(r -> r[0].equalsIgnoreCase(name)).findFirst().orElse(null); }
+    private boolean accountExists(String name) {
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                String[] parts = line.split("\\t", -1);
+                if (parts.length > 0 && parts[0].equalsIgnoreCase(name)) return true;
+            }
+        } catch (IOException ignored) { }
+        return false;
+    }
     private List<String[]> readReplace(String[] replacement) {
         List<String[]> rows = read(); String[] old = find(rows, replacement[0]);
-        if (old == null) rows.add(replacement); else { old[1] = replacement[1]; old[2] = replacement[2]; old[3] = replacement[3]; old[4] = replacement[4]; }
+        if (old == null) rows.add(replacement); else {
+            // Login may refresh only session metadata. Salt and password hash
+            // are never changed by the lobby plugin; only the panel API may
+            // change them.
+            old[3] = replacement[3]; old[4] = replacement[4];
+        }
         return rows;
     }
     private void write(List<String[]> rows) {

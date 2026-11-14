@@ -1,5 +1,7 @@
 """Tests for game-account authentication storage and panel management endpoints."""
 import time
+import zipfile
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -51,6 +53,25 @@ def test_session_is_bound_to_name_and_ip_and_touch_extends_it():
     after = auth_sessions.sessions()[0]["expires_at"]
     assert after >= before
     assert not auth_sessions.touch("steve", "203.0.113.8")
+
+
+def test_extended_session_row_is_readable_and_password_material_is_preserved():
+    row = put_row()
+    row.append("stable-client-hash")
+    auth_sessions.SESSION_FILE.write_text("\t".join(row) + "\n", encoding="utf-8")
+    before = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").split("\t")
+
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+    assert auth_sessions.touch("Steve", "203.0.113.7")
+    after_touch = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").split("\t")
+    assert after_touch[1:3] == before[1:3]
+    assert after_touch[5].strip() == "stable-client-hash"
+
+    assert auth_sessions.set_password("Steve", "new-secret-password")
+    after_password = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").split("\t")
+    assert after_password[1] != before[1]
+    assert after_password[2] == password_hash("new-secret-password", after_password[1])
+    assert after_password[5].strip() == ""
 
 
 def test_clearing_a_session_keeps_the_password():
@@ -161,6 +182,38 @@ def test_fingerprint_is_stable_merged_and_bound_to_the_session_ip():
     assert auth_sessions.sessions() == []
 
 
+def test_fingerprint_hash_ignores_variable_client_settings():
+    put_row()
+    first = fingerprint_snapshot()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, first)
+    original = auth_sessions.fingerprint("Steve")["hash"]
+
+    changed = fingerprint_snapshot()
+    changed["client_info"] = {
+        **changed["client_info"],
+        "locale": "pl_pl", "view_distance": 32, "chat_mode": 2,
+        "chat_colors": False, "skin_parts": 0, "main_hand": 1,
+        "text_filtering": True, "allow_listings": False,
+    }
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, changed)
+    assert auth_sessions.fingerprint("Steve")["hash"] == original
+    assert auth_sessions.valid("Steve", "203.0.113.7")
+
+
+def test_changed_stable_fingerprint_invalidates_session_but_keeps_password():
+    row = put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
+    original_password_hash = row[2]
+    changed = fingerprint_snapshot(channel="fabric:registry/sync")
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, changed)
+
+    assert auth_sessions.sessions() == []
+    assert not auth_sessions.valid("Steve", "203.0.113.7")
+    stored = auth_sessions.SESSION_FILE.read_text(encoding="utf-8").split("\t")
+    assert stored[2] == original_password_hash
+    assert auth_sessions.set_password("Steve", "replacement-password")
+
+
 def test_session_detail_endpoint_returns_fingerprint_but_never_password_material():
     put_row()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
@@ -179,6 +232,33 @@ def test_session_detail_endpoint_returns_fingerprint_but_never_password_material
     assert client.get("/api/player-auth/sessions/nobody").status_code == 404
 
 
+def test_registered_account_detail_is_available_after_logout_without_secrets():
+    put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
+    auth_sessions.clear_session("Steve")
+    app = FastAPI()
+    app.include_router(api.router)
+    client = TestClient(app)
+    client.cookies.set(auth.COOKIE, auth.make_token("admin"))
+
+    response = client.get("/api/player-auth/accounts/steve")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["active"] is False
+    assert body["fingerprint"]["hash"]
+    text = str(body).lower()
+    assert "salt" not in text and "password" not in text and PASSWORD not in text
+
+
+def test_player_auth_endpoints_require_panel_authentication():
+    app = FastAPI()
+    app.include_router(api.router)
+    client = TestClient(app)
+    assert client.get("/api/player-auth/accounts").status_code in (401, 403)
+    assert client.get("/api/player-auth/accounts/Steve").status_code in (401, 403)
+    assert client.put("/api/player-auth/accounts/Steve/password", json={"password": "attacker-password"}).status_code in (401, 403)
+
+
 def test_logout_and_password_change_keep_the_fingerprint_until_account_removal():
     put_row()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
@@ -195,3 +275,14 @@ def test_logout_and_password_change_keep_the_fingerprint_until_account_removal()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
     auth_sessions.delete_account("steve")
     assert auth_sessions.fingerprint("steve") is None
+
+
+def test_java_plugin_is_create_only_and_supports_fingerprint_column():
+    root = Path(__file__).parents[1] / "auth_plugin"
+    source = (root / "src/pl/minenode/auth/MineNodeAuth.java").read_text(encoding="utf-8")
+    assert "accountExists(name)" in source
+    assert "r.length >= 5" in source
+    assert "old[1] = replacement[1]" not in source
+    assert "old[2] = replacement[2]" not in source
+    with zipfile.ZipFile(root / "MineNodeAuth.jar") as jar:
+        assert "pl/minenode/auth/MineNodeAuth.class" in jar.namelist()
