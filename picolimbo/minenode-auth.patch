@@ -105,7 +105,7 @@ index 0000000..af60944
 +    hex::encode(bytes)
 +}
 +
-+pub enum ResultKind { Message(String), Success(String) }
++pub enum ResultKind { Message(String), Success(String), Kick(String) }
 +
 +pub fn command(name: &str, command: &str) -> Option<ResultKind> {
 +    let mut parts = command.split_whitespace();
@@ -136,7 +136,7 @@ index 0000000..af60944
 +    if args.len() != 1 { return Some(ResultKind::Message("Użycie: /login <hasło>".into())); }
 +    let Some(i) = index else { return Some(ResultKind::Message("Nieprawidłowy nick lub hasło.".into())); };
 +    let Some(candidate) = pbkdf2(args[0], &data[i][1]) else { return Some(ResultKind::Message("Nieprawidłowy nick lub hasło.".into())); };
-+    if candidate.as_bytes().ct_eq(data[i][2].as_bytes()).unwrap_u8() != 1 { return Some(ResultKind::Message("Nieprawidłowy nick lub hasło.".into())); }
++    if candidate.as_bytes().ct_eq(data[i][2].as_bytes()).unwrap_u8() != 1 { return Some(ResultKind::Kick("Nieprawidłowe hasło. Połącz się ponownie, aby spróbować jeszcze raz.".into())); }
 +    match ip {
 +        Some(ip) => data[i][3] = ip,
 +        None if data[i][3].is_empty() || data[i][3] == "unknown" => {
@@ -303,7 +303,7 @@ index 728f7c3..f4e27a6 100644
  fn run_command(
      client_state: &mut ClientState,
      server_state: &ServerState,
-@@ -47,9 +103,19 @@ fn run_command(
+@@ -47,9 +103,20 @@ fn run_command(
      info!(
          "{} issued server command: /{}",
          client_state.get_username(),
@@ -316,7 +316,8 @@ index 728f7c3..f4e27a6 100644
 +            ResultKind::Message(message) => {
 +                send_message(batch, &Component::new(message), client_state.protocol_version());
 +            }
-+            ResultKind::Success(message) => client_state.kick(&message),
++            // A wrong password ends the visit (Kick): one guess per connection, rate-limited by the proxy.
++            ResultKind::Success(message) | ResultKind::Kick(message) => client_state.kick(&message),
 +        }
 +        return;
 +    }
@@ -324,7 +325,7 @@ index 728f7c3..f4e27a6 100644
      if let Ok(parsed_command) = Command::parse(server_state.server_commands(), command) {
          match parsed_command {
              Command::Spawn => {
-@@ -160,3 +226,26 @@ impl Command {
+@@ -160,3 +227,26 @@ impl Command {
          }
      }
  }

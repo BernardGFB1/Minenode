@@ -1,162 +1,191 @@
 <template>
-  <div class="public-page">
-    <div v-if="loading && !data" class="public-center">
-      <Loader2 class="spin" />
-      <span class="muted">{{ $t('Ładowanie serwera…') }}</span>
-    </div>
+  <div class="pub">
+    <header class="topbar">
+      <a href="/" class="brand">
+        <BrandMark />
+        <span class="brand-name">MineNode</span>
+      </a>
+      <span class="spacer" />
+      <router-link v-if="auth.user && data" :to="`/servers/${data.server.id}`" class="btn sm ghost"><Settings2 /> {{ $t('Zarządzaj w panelu') }}</router-link>
+      <LangSwitch />
+      <button class="btn ghost sm icon" :title="ui.theme === 'dark' ? $t('Jasny motyw') : $t('Ciemny motyw')" @click="toggleTheme">
+        <Sun v-if="ui.theme === 'dark'" /><Moon v-else />
+      </button>
+    </header>
 
-    <div v-else-if="!data" class="public-center error-card">
-      <MapIcon />
-      <h1>{{ $t('Nie znaleziono serwera') }}</h1>
-      <p class="muted">{{ error || $t('Ten adres nie prowadzi do żadnego serwera.') }}</p>
-      <router-link to="/" class="btn"><Home /> {{ $t('Przejdź do panelu') }}</router-link>
-    </div>
+    <main class="page">
+      <div v-if="loading && !data" class="card empty"><Loader2 class="spin" /><div>{{ $t('Ładowanie serwera…') }}</div></div>
 
-    <template v-else>
-      <header class="hero">
-        <img v-if="iconOk && data.server.icon" class="server-icon" :src="data.server.icon" alt="" @error="iconOk = false" />
-        <div v-else class="server-icon fallback">{{ initials(data.server.name) }}</div>
-        <div class="grow" style="min-width: 0">
-          <div class="row wrap" style="gap: 10px">
-            <h1 class="server-name">{{ data.server.name }}</h1>
-            <StatusBadge :state="data.server.state" />
-          </div>
-          <div class="row wrap hero-meta">
-            <span>{{ engineName }} <span class="mono">{{ data.server.mc_version }}</span></span>
-            <span v-if="data.server.loader_version" class="mono">{{ data.server.loader_version }}</span>
-            <button class="addr mono" :title="$t('Kopiuj adres')" @click="copyAddress">
-              <Globe /> {{ data.server.address }} <Copy />
-            </button>
-          </div>
-          <div v-if="data.server.motd" class="motd" v-html="mcToHtml(data.server.motd)" />
-        </div>
-        <div class="hero-count">
-          <div class="count-line"><span class="count-num num">{{ data.players.online }}</span><span class="count-max num">/ {{ data.players.max }}</span></div>
-          <div class="small muted">{{ $t('graczy online') }}</div>
-          <div class="server-run small" :class="{ on: data.server.running }">
-            <span class="dot" />{{ data.server.running ? $t('Serwer jest włączony') : $t('Serwer jest wyłączony') }}
-          </div>
-        </div>
-      </header>
-
-      <div class="players-grid">
-        <section class="card">
-          <div class="card-head">
-            <Users /><h3>{{ $t('Gracze online') }}</h3>
-            <span class="badge green">{{ data.online.length }}</span>
-          </div>
-          <div class="card-body">
-            <div v-if="!data.online.length" class="players-empty">
-              <Gamepad2 />
-              <span>{{ $t('Nikt teraz nie gra.') }}</span>
-            </div>
-            <ul v-else class="player-list">
-              <li v-for="p in data.online" :key="p.name">
-                <span class="avatar" :style="avatarStyle(p.name)">{{ initials(p.name) }}</span>
-                <div class="grow" style="min-width: 0">
-                  <b class="ellipsis">{{ p.name }}</b>
-                  <div class="tiny muted">{{ $t('Na serwerze od {t}', { t: formatDuration(Math.max(0, now - (p.joined_at || now))) }) }}</div>
-                </div>
-                <span class="online-pill"><span class="dot" />{{ $t('online') }}</span>
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        <section class="card">
-          <div class="card-head">
-            <UserMinus /><h3>{{ $t('Gracze offline') }}</h3>
-            <span class="badge">{{ data.players.offline }}</span>
-          </div>
-          <div class="card-body">
-            <div v-if="!data.offline.length" class="players-empty">
-              <UserMinus />
-              <span>{{ $t('Brak graczy w historii.') }}</span>
-            </div>
-            <ul v-else class="player-list offline-list">
-              <li v-for="p in data.offline" :key="p.name">
-                <span class="avatar dim" :style="avatarStyle(p.name)">{{ initials(p.name) }}</span>
-                <div class="grow" style="min-width: 0">
-                  <b class="ellipsis">{{ p.name }}</b>
-                  <div class="tiny muted">{{ $t('Ostatnio online {t}', { t: timeAgo(p.last_seen) }) }}</div>
-                </div>
-                <span class="tiny muted nowrap" :title="$t('Ostatnio online {t}', { t: timeAgo(p.last_seen) })">{{ formatDate(p.last_seen) }}</span>
-              </li>
-            </ul>
-          </div>
-        </section>
+      <div v-else-if="!data" class="card empty">
+        <ServerOff />
+        <h2 class="missing-title">{{ $t('Nie znaleziono serwera') }}</h2>
+        <p>{{ error || $t('Ten adres nie prowadzi do żadnego serwera.') }}</p>
       </div>
 
-      <section class="card map-card">
-        <div class="card-head">
-          <MapIcon /><h3>{{ $t('Mapa serwera') }}</h3>
-          <span v-if="data.map.available" class="badge green"><span class="dot" />{{ $t('na żywo') }}</span>
-          <span v-else class="badge">{{ $t('niedostępna') }}</span>
-          <a v-if="data.map.available" :href="data.map.url" target="_blank" rel="noopener" class="btn sm ghost">
-            <ExternalLink /> {{ $t('Otwórz w nowej karcie') }}
-          </a>
-        </div>
-        <div v-if="data.map.available" class="map-frame">
-          <iframe :src="data.map.url" :title="$t('Mapa {name}', { name: data.server.name })" loading="lazy" referrerpolicy="no-referrer" />
-        </div>
-        <div v-else class="card-body">
-          <div class="callout info small">
-            <Info />
-            <div v-if="!data.map.enabled">{{ $t('Mapa squaremap jest wyłączona na tym serwerze.') }}</div>
-            <div v-else>{{ $t('Mapa pojawi się po pierwszym uruchomieniu serwera z squaremap. Wygenerowanie kafelków może zająć chwilę.') }}</div>
+      <template v-else>
+        <header class="head">
+          <ServerAvatar :server="s" :src="s.icon" :size="64" />
+          <div class="grow" style="min-width: 0">
+            <div class="row" style="gap: 10px">
+              <h1 class="ellipsis">{{ s.name }}</h1>
+              <StatusBadge :state="s.state" />
+            </div>
+            <div class="row wrap meta small">
+              <span>{{ engineName }} <span class="mono">{{ s.mc_version }}</span></span>
+              <span v-if="!s.online_mode">{{ $t('Konta non-premium mile widziane') }}</span>
+              <span v-if="s.whitelist">{{ $t('Whitelista') }}</span>
+            </div>
+          </div>
+          <button class="btn primary" @click="copyAddress"><Copy /> {{ $addr(s.address) }}</button>
+        </header>
+
+        <div class="grid grid-4">
+          <div class="card tile">
+            <div class="tl"><Users /> {{ $t('Gracze online') }}</div>
+            <div class="tv num">{{ data.players.online }}<small> / {{ data.players.max }}</small></div>
+            <Meter :value="data.players.online / (data.players.max || 1)" />
+          </div>
+          <div class="card tile">
+            <div class="tl"><Timer /> {{ $t('Czas działania') }}</div>
+            <div class="tv num">{{ isUp && s.started_at ? formatDuration(now - s.started_at) : '—' }}</div>
+            <div class="tiny muted">{{ $t(STATE[s.state]?.label || s.state) }}</div>
+          </div>
+          <div class="card tile">
+            <div class="tl"><Gamepad2 /> {{ $t('Wersja gry') }}</div>
+            <div class="tv num">{{ s.mc_version }}</div>
+            <div class="tiny muted ellipsis">{{ engineName }}<template v-if="s.loader_version"> · <span class="mono">{{ s.loader_version }}</span></template></div>
+          </div>
+          <div class="card tile">
+            <div class="tl"><History /> {{ $t('Gracze w historii') }}</div>
+            <div class="tv num">{{ data.players.known }}</div>
+            <div class="tiny muted">{{ lastSeenText }}</div>
           </div>
         </div>
-      </section>
 
-      <footer class="public-foot">
-        <span>{{ $t('Strona serwera odświeża się automatycznie co 5 sekund.') }}</span>
-        <span class="spacer" />
-        <span class="muted">{{ $t('MineNode') }}</span>
-      </footer>
-    </template>
+        <div class="grid grid-2">
+          <section class="card">
+            <div class="card-head"><h3>{{ $t('Online teraz') }}</h3><span class="badge" :class="{ green: data.online.length }">{{ data.online.length }}</span></div>
+            <div v-if="!data.online.length" class="empty small"><Moon /><div>{{ isUp ? $t('Nikt teraz nie gra – wskocz pierwszy!') : $t('Serwer jest wyłączony.') }}</div></div>
+            <ul v-else class="plist">
+              <li v-for="p in data.online" :key="p.name">
+                <img class="head-img" :src="headUrl(p.name)" alt="" referrerpolicy="no-referrer" loading="lazy" />
+                <div class="grow">
+                  <div class="pname ellipsis">{{ p.name }}</div>
+                  <div class="tiny muted">{{ $t('Na serwerze od {t}', { t: formatDuration(Math.max(0, now - (p.joined_at || now))) }) }}</div>
+                </div>
+                <span class="dot green" />
+              </li>
+            </ul>
+          </section>
+
+          <section class="card">
+            <div class="card-head"><h3>{{ $t('Jak dołączyć') }}</h3></div>
+            <div class="card-body col" style="gap: 14px">
+              <ServerListEntry :name="s.name" :motd="s.motd" :icon="s.icon" :players="`${data.players.online}/${data.players.max}`"
+                               :version-label="isUp ? '' : '§cOffline'" />
+              <ol class="steps small">
+                <li>{{ $t('Otwórz Minecraft: Java Edition w wersji {v}.', { v: s.mc_version }) }}</li>
+                <li>{{ $t('Wejdź w Tryb wieloosobowy → Dodaj serwer.') }}</li>
+                <li>
+                  {{ $t('Wpisz adres serwera:') }}
+                  <button class="addr mono" :title="$t('Kopiuj adres')" @click="copyAddress"><Globe /> {{ $addr(s.address) }} <Copy /></button>
+                </li>
+              </ol>
+            </div>
+          </section>
+        </div>
+
+        <section v-if="data.offline.length" class="card">
+          <div class="card-head">
+            <h3>{{ $t('Ostatnio na serwerze') }}</h3>
+            <input v-if="data.offline.length > 12" v-model="query" class="input search" :placeholder="$t('Szukaj gracza…')" />
+          </div>
+          <div class="recent">
+            <div v-for="p in recentShown" :key="p.name" class="recent-item">
+              <img class="head-img" :src="headUrl(p.name)" alt="" referrerpolicy="no-referrer" loading="lazy" />
+              <div class="grow">
+                <div class="pname ellipsis">{{ p.name }}</div>
+                <div class="tiny muted" :title="formatDate(p.last_seen)">{{ timeAgo(p.last_seen) }}</div>
+              </div>
+            </div>
+            <div v-if="!recentShown.length" class="tiny muted" style="padding: 4px 2px">{{ $t('Brak graczy pasujących do wyszukiwania.') }}</div>
+          </div>
+          <div v-if="recentFiltered.length > recentShown.length" class="more">
+            <button class="btn sm ghost" @click="limit += 24">{{ $t('Pokaż więcej ({n})', { n: recentFiltered.length - recentShown.length }) }}</button>
+          </div>
+        </section>
+
+        <section v-if="data.map.enabled" class="card">
+          <div class="card-head">
+            <h3>{{ $t('Mapa świata') }}</h3>
+            <span v-if="data.map.available" class="badge green"><span class="dot green" />{{ $t('na żywo') }}</span>
+            <a v-if="data.map.available" :href="data.map.url" target="_blank" rel="noopener" class="btn sm ghost"><Maximize2 /> {{ $t('Pełny ekran') }}</a>
+          </div>
+          <div v-if="data.map.available" class="map-frame">
+            <iframe :src="data.map.url" :title="$t('Mapa {name}', { name: s.name })" loading="lazy" referrerpolicy="no-referrer" />
+          </div>
+          <div v-else class="card-body">
+            <div class="callout info small"><Info /><div>{{ $t('Mapa pojawi się po pierwszym uruchomieniu serwera z squaremap. Wygenerowanie kafelków może zająć chwilę.') }}</div></div>
+          </div>
+        </section>
+
+        <footer class="foot tiny muted">
+          <span>{{ $t('Dane odświeżają się automatycznie.') }}</span>
+          <span class="spacer" />
+          <span>{{ $t('Strona serwera hostowanego w MineNode') }}</span>
+        </footer>
+      </template>
+    </main>
   </div>
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { Copy, ExternalLink, Gamepad2, Globe, Home, Info, Loader2, Map as MapIcon, UserMinus, Users } from 'lucide-vue-next'
+import { Copy, Gamepad2, Globe, History, Info, Loader2, Maximize2, Moon, ServerOff, Settings2, Sun, Timer, Users } from 'lucide-vue-next'
+import BrandMark from '../components/BrandMark.vue'
+import LangSwitch from '../components/LangSwitch.vue'
+import Meter from '../components/Meter.vue'
+import ServerAvatar from '../components/ServerAvatar.vue'
+import ServerListEntry from '../components/ServerListEntry.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import { copyText, ENGINE_META, formatDate, formatDuration, mcToHtml, timeAgo } from '../utils'
-import { toast } from '../store'
+import { auth, toast, toggleTheme, ui } from '../store'
+import { copyText, ENGINE_META, formatDate, formatDuration, STATE, timeAgo } from '../utils'
+
+const REFRESH_MS = 10_000
 
 const route = useRoute()
 const data = ref(null)
 const error = ref('')
 const loading = ref(true)
-const iconOk = ref(true)
 const now = ref(Date.now() / 1000)
-let timer = null
+const query = ref('')
+const limit = ref(24)
+let poll = null
+let clock = null
 
 const key = computed(() => String(route.params.key || ''))
-const engineName = computed(() => ENGINE_META[data.value?.server.type]?.name || data.value?.server.type || '')
+const s = computed(() => data.value?.server)
+const engineName = computed(() => ENGINE_META[s.value?.type]?.name || s.value?.type || '')
+const isUp = computed(() => ['online', 'starting', 'stopping'].includes(s.value?.state))
+const recentFiltered = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  return (data.value?.offline || []).filter((p) => !q || p.name.toLowerCase().includes(q))
+})
+const recentShown = computed(() => recentFiltered.value.slice(0, limit.value))
+const lastSeenText = computed(() => {
+  if (data.value?.online.length) return t('ktoś gra właśnie teraz')
+  const last = data.value?.offline[0]?.last_seen
+  return last ? t('ostatnio ktoś grał {t}', { t: timeAgo(last) }) : t('nikt jeszcze nie grał')
+})
 
-const COLORS = ['#4f7bd8', '#d97757', '#4f9d7a', '#b88b3d', '#8b6fc0', '#3f94b8', '#c25d83', '#6c8c3f']
-
-function hash(text) {
-  let value = 0
-  for (const char of text || '?') value = (value * 31 + char.charCodeAt(0)) >>> 0
-  return value
-}
-function initials(name) {
-  const clean = String(name || '?').replace(/[^A-Za-z0-9_]/g, '')
-  return (clean.slice(0, 2) || '?').toUpperCase()
-}
-function avatarStyle(name) {
-  return { background: COLORS[hash(name.toLowerCase()) % COLORS.length] }
-}
+const headUrl = (name) => `https://mc-heads.net/avatar/${encodeURIComponent(name)}/40`
 
 async function load() {
   try {
     data.value = await api.get(`/public/servers/${encodeURIComponent(key.value)}/stats`)
     error.value = ''
-    now.value = Date.now() / 1000
   } catch (err) {
     if (!data.value) error.value = err?.status === 404 ? t('Ten adres nie prowadzi do żadnego serwera.') : (err?.message || '')
   } finally {
@@ -165,81 +194,80 @@ async function load() {
 }
 
 async function copyAddress() {
-  if (await copyText(data.value?.server.address || '')) toast(t('Skopiowano adres'), 'success')
+  if (await copyText(s.value?.address || '')) toast(t('Skopiowano adres'), 'success', 1800)
 }
 
-watch(key, () => { data.value = null; iconOk.value = true; loading.value = true; load() })
+watch(key, () => { data.value = null; loading.value = true; query.value = ''; limit.value = 24; load() })
 watchEffect(() => {
-  if (data.value) document.title = `${data.value.server.name} – ${data.value.players.online} ${t('online')}`
+  if (data.value) document.title = `${s.value.name} · ${data.value.players.online}/${data.value.players.max} ${t('online')}`
 })
 onMounted(() => {
   load()
-  timer = setInterval(() => {
-    if (document.visibilityState === 'visible') load()
-  }, 5000)
+  poll = setInterval(() => document.visibilityState === 'visible' && load(), REFRESH_MS)
+  clock = setInterval(() => (now.value = Date.now() / 1000), 1000)
 })
 onUnmounted(() => {
-  clearInterval(timer)
+  clearInterval(poll)
+  clearInterval(clock)
   document.title = 'MineNode'
 })
 </script>
 <style scoped>
-.public-page { max-width: 1240px; margin: 0 auto; padding: 34px 28px 56px; }
-.public-center { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
-.public-center > svg { width: 42px; height: 42px; color: var(--muted); opacity: 0.75; }
-.public-center .btn { margin-top: 6px; }
-.error-card h1 { font-size: 20px; }
+.pub { min-height: 100vh; background: var(--bg); }
+.topbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; height: 58px; padding: 0 24px;
+  border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; }
+.brand :deep(.mark) { width: 28px; height: 28px; }
+.brand-name { font-weight: 650; letter-spacing: -0.01em; }
+.page { max-width: 1120px; display: flex; flex-direction: column; gap: 16px; }
 
-.hero {
-  position: relative; display: flex; align-items: center; gap: 18px; padding: 24px 26px;
-  border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
-  background:
-    radial-gradient(900px 240px at 0% 0%, rgba(134, 192, 98, 0.17), transparent 62%),
-    radial-gradient(760px 220px at 100% 110%, rgba(100, 168, 216, 0.13), transparent 60%),
-    var(--surface);
-}
-.server-icon { width: 64px; height: 64px; border-radius: 14px; flex: none; object-fit: cover; border: 1px solid var(--border-strong); background: var(--surface-2); }
-.server-icon.fallback { display: grid; place-items: center; font-weight: 700; font-size: 22px; color: var(--accent); background: var(--accent-soft); }
-.server-name { font-size: 25px; overflow-wrap: anywhere; }
-.hero-meta { gap: 8px 16px; margin-top: 6px; color: var(--text-2); font-size: 13px; }
-.addr { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; }
-.addr svg { width: 14px; height: 14px; }
-.addr:hover { text-decoration: underline; }
-.motd { margin-top: 10px; color: var(--text-2); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
-.hero-count { flex: none; min-width: 150px; text-align: right; }
-.count-line { display: flex; align-items: baseline; justify-content: flex-end; gap: 5px; }
-.count-num { font-size: 40px; line-height: 1; font-weight: 650; letter-spacing: -0.03em; }
-.count-max { color: var(--muted); font-size: 16px; }
-.server-run { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 9px; color: var(--muted); }
-.server-run .dot { width: 7px; height: 7px; }
-.server-run.on { color: var(--accent); }
-.server-run.on .dot { background: currentColor; }
+.head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 2px; }
+.head h1 { font-size: 24px; }
+.meta { color: var(--muted); gap: 6px 14px; margin-top: 4px; }
+.missing-title { font-size: 17px; color: var(--text); margin: 4px 0 6px; }
 
-.players-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
-.players-grid .card-head > svg, .map-card .card-head > svg { width: 17px; height: 17px; color: var(--muted); }
-.players-grid .card-body { padding-top: 6px; padding-bottom: 6px; }
-.player-list { list-style: none; margin: 0; padding: 0; }
-.player-list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-.player-list li:last-child { border-bottom: 0; }
-.offline-list { max-height: 360px; overflow-y: auto; padding-right: 4px; }
-.avatar { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; flex: none; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; }
-.avatar.dim { filter: saturate(0.45); opacity: 0.75; }
-.online-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 12px; white-space: nowrap; }
-.online-pill .dot { width: 7px; height: 7px; background: currentColor; }
-.players-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px 10px; color: var(--muted); font-size: 13px; }
-.players-empty svg { width: 26px; height: 26px; opacity: 0.65; }
+.tile { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tl { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); font-weight: 550; }
+.tl svg { width: 15px; height: 15px; color: var(--muted); }
+.tv { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
+.tv small { font-size: 13px; color: var(--muted); font-weight: 500; }
 
-.map-card { margin-top: 16px; }
+.head-img { width: 32px; height: 32px; border-radius: 7px; flex: none; image-rendering: pixelated; background: var(--surface-2); }
+.pname { font-weight: 550; font-size: 13.5px; }
+.plist { list-style: none; margin: 0; padding: 6px 20px; }
+.plist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.plist li:last-child { border-bottom: 0; }
+.dot.green { background: var(--accent); }
+.empty.small { padding: 36px 20px; font-size: 13px; }
+
+.steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: var(--text-2); }
+.addr { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px; vertical-align: middle; }
+.addr:hover { border-color: var(--border-strong); }
+.addr svg { width: 13px; height: 13px; color: var(--muted); }
+
+.search { width: 200px; height: 30px; font-size: 12.5px; }
+.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; padding: 14px 20px; }
+.recent-item { display: flex; align-items: center; gap: 10px; padding: 6px 4px; min-width: 0; }
+.recent-item .head-img { filter: saturate(0.7); }
+.more { display: flex; justify-content: center; padding: 0 0 12px; }
+
 .map-frame { padding: 12px; }
-.map-frame iframe { display: block; width: 100%; height: min(72vh, 760px); min-height: 460px; border: 0; border-radius: 10px; background: #101512; }
+.map-frame iframe { display: block; width: 100%; height: min(70vh, 720px); min-height: 420px; border: 0; border-radius: var(--radius);
+  background: var(--surface-2); }
+.badge .dot { width: 6px; height: 6px; }
 
-.public-foot { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 0 4px; color: var(--muted); font-size: 12px; }
+.foot { display: flex; gap: 12px; padding: 4px 2px 0; }
 
 @media (max-width: 900px) {
-  .public-page { padding: 20px 16px 40px; }
-  .players-grid { grid-template-columns: 1fr; }
-  .hero { flex-wrap: wrap; padding: 20px; }
-  .hero-count { width: 100%; text-align: left; }
-  .count-line, .server-run { justify-content: flex-start; }
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .topbar { padding: 0 16px; }
+  .page { padding: 18px 16px 40px; }
+  .head .btn.primary { width: 100%; justify-content: center; }
+  .search { width: 140px; }
+  .foot { flex-direction: column; gap: 4px; }
 }
 </style>

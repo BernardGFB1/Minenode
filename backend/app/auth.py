@@ -21,6 +21,8 @@ SESSION_TTL = 14 * 24 * 3600
 
 _users = JsonStore(PANEL_DIR / "users.json", dict)
 _secret_file = PANEL_DIR / "secret.key"
+# Signatures of cookies ended by "Wyloguj" (sha256 -> expiry), so a copied cookie stops working too.
+_revoked = JsonStore(PANEL_DIR / "revoked_sessions.json", dict)
 # Login throttling. Every attempt is counted before the password is checked, so parallel requests
 # cannot slip past the limit; the per-account limit also holds when an attacker spreads attempts
 # over many IP addresses.
@@ -151,9 +153,18 @@ def login(username: str, password: str, ip: str) -> str:
     return make_token(username)
 
 
+def _account_key(user: dict) -> str:
+    """Ties a cookie to this exact account: a user deleted and created again under the same name
+    gets a new password salt, so cookies issued to the old account do not come back to life."""
+    return hmac.new(_secret(), user.get("password_hash", "").encode(), hashlib.sha256).hexdigest()[:16]
+
+
 def make_token(username: str) -> str:
-    tv = _users.data.get(username, {}).get("token_version", 0)
-    payload = base64.urlsafe_b64encode(json.dumps({"u": username, "exp": int(time.time()) + SESSION_TTL, "v": tv}).encode()).decode().rstrip("=")
+    user = _users.data.get(username, {})
+    tv = user.get("token_version", 0)
+    payload = base64.urlsafe_b64encode(json.dumps({"u": username, "exp": int(time.time()) + SESSION_TTL, "v": tv,
+                                                   "k": _account_key(user), "n": secrets.token_hex(6)}
+                                                  ).encode()).decode().rstrip("=")  # n: every login is a separate session
     sig = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
@@ -171,10 +182,36 @@ def verify_token(token: str | None) -> str | None:
         return None
     if data.get("exp", 0) < time.time():
         return None
-    user = _users.data.get(data.get("u"))
+    name = data.get("u")
+    user = _users.data.get(name) if isinstance(name, str) else None
     if not user or user.get("token_version", 0) != data.get("v", 0):
         return None
-    return data["u"]
+    if not hmac.compare_digest(str(data.get("k", "")), _account_key(user)):
+        return None
+    if _sig_id(sig) in _revoked.data:
+        return None
+    return name
+
+
+def _sig_id(sig: str) -> str:
+    return hashlib.sha256(sig.encode()).hexdigest()
+
+
+def revoke_token(token: str | None) -> None:
+    """End one session (logout). Expired entries are pruned on the way."""
+    if not verify_token(token):
+        return
+    payload, sig = token.rsplit(".", 1)
+    try:
+        exp = int(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("exp", 0))
+    except Exception:
+        exp = int(time.time()) + SESSION_TTL
+    now = time.time()
+    data = {k: v for k, v in _revoked.data.items() if v > now}
+    data[_sig_id(sig)] = exp
+    _revoked.data.clear()
+    _revoked.data.update(data)
+    _revoked.save()
 
 
 def require_user(request: Request) -> str:

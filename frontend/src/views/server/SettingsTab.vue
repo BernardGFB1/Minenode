@@ -64,7 +64,7 @@
 
     <BedrockCard :server-id="id" />
 
-    <SquaremapCard :server-id="id" />
+    <PublicPageCard :server-id="id" :subdomain="live.summary.subdomain" />
 
     <section class="card">
       <div class="card-head"><Wrench class="hi" /><h3>{{ $t('Silnik i wersja') }}</h3></div>
@@ -99,7 +99,7 @@ import Toggle from '../../components/Toggle.vue'
 import VersionPicker from '../../components/VersionPicker.vue'
 import VoiceChatCard from '../../components/VoiceChatCard.vue'
 import BedrockCard from '../../components/BedrockCard.vue'
-import SquaremapCard from '../../components/SquaremapCard.vue'
+import PublicPageCard from '../../components/PublicPageCard.vue'
 import { api, download } from '../../api'
 import { confirmDialog, toast, toastError } from '../../store'
 import { refreshFleet } from '../../servers'

@@ -17,6 +17,7 @@
           </div>
         </div>
         <div class="actions">
+          <a :href="`/${s.subdomain}/stats`" target="_blank" rel="noopener" class="btn" :title="$t('Publiczna strona ze statystykami serwera')"><BarChart3 /> {{ $t('Statystyki') }}</a>
           <button v-if="canStart" class="btn primary" :disabled="pending" @click="power('start')"><Play /> {{ $t('Uruchom') }}</button>
           <template v-else>
             <button class="btn" :disabled="pending || !s.installed || s.state === 'stopping' || s.state === 'installing'" @click="power('restart')"><RotateCcw /> {{ $t('Restart') }}</button>
@@ -52,7 +53,7 @@
 <script setup>
 import { computed, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Loader2, Play, Square, RotateCcw, Zap, Globe, Copy, AlertTriangle, Gauge, TerminalSquare, Users, SlidersHorizontal, Coffee, FolderOpen, Archive, Settings2, Puzzle, Image } from 'lucide-vue-next'
+import { Loader2, Play, Square, RotateCcw, Zap, Globe, Copy, AlertTriangle, Gauge, TerminalSquare, Users, SlidersHorizontal, Coffee, FolderOpen, Archive, Settings2, Puzzle, Image, BarChart3 } from 'lucide-vue-next'
 import ServerAvatar from '../../components/ServerAvatar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { api, connectServer } from '../../api'

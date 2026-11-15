@@ -53,5 +53,6 @@ router.beforeEach(async (to) => {
 })
 
 window.addEventListener('minenode:unauthorized', () => {
-  if (router.currentRoute.value.name !== 'login') router.push({ name: 'login' })
+  const current = router.currentRoute.value
+  if (current.name !== 'login' && !current.meta.public) router.push({ name: 'login' })
 })

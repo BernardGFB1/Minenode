@@ -144,8 +144,17 @@ def touch(name: str, ip: str) -> bool:
         return True
 
 
+def account_ip(name: str) -> str | None:
+    """The address a registered player last logged in from (None for unknown names)."""
+    with _lock:
+        row = _read().get(name.lower())
+    return row[3] if row and row[3] else None
+
+
 def set_pending(name: str, ip: str) -> None:
     """Pass the real client IP to the local PicoLimbo lobby."""
+    if any(ch in name or ch in ip for ch in "\t\r\n"):  # would add a forged row to the file
+        raise ValueError("invalid character in player name or address")
     with _lock:
         rows = _pending_read()
         rows[name.lower()] = (ip, int(time.time()))

@@ -19,6 +19,7 @@ import socket
 import struct
 import sys
 import time
+from collections import deque
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -130,6 +131,78 @@ def chat(text: str, color: str | None = None) -> dict:
     return d
 
 
+def safe_player_name(name: str | None) -> bool:
+    """A login name that is safe to store in the tab-separated auth files and to route on.
+
+    Tabs or line breaks in a name would add fake rows to sessions.db / pending.db (and with them a
+    session for somebody else), so such names are refused before anything is written."""
+    return bool(name) and len(name) <= 16 and not any(ord(ch) < 32 or ord(ch) == 127 for ch in name)
+
+
+def _same_ip(a: str, b: str) -> bool:
+    from .auth_sessions import _norm_ip
+    return _norm_ip(a) == _norm_ip(b)
+
+
+class LobbyGate:
+    """Who may enter the hidden /login lobby under which name, and how often.
+
+    * One owner per name: PicoLimbo reads the client IP for /login and /register from pending.db,
+      which is keyed by name. While somebody is in the lobby as "Steve", a connection as "Steve"
+      from another address is refused – otherwise it would replace the pending IP and the real
+      Steve's /login would open a session for the attacker's address.
+    * Failed visits (left the lobby without a valid session) are limited per IP and per name, so
+      passwords cannot be guessed endlessly. The name limit never locks out the address the
+      account last logged in from.
+    """
+    WINDOW = 15 * 60
+    IP_FAILS = 10
+    NAME_FAILS = 20
+    LOGIN_TIMEOUT = 3 * 60  # seconds a player may stay in the lobby without logging in
+    _MAX_TRACKED = 10_000
+
+    def __init__(self) -> None:
+        self.owners: dict[str, tuple[str, int]] = {}  # lowercase name -> (ip, open connections)
+        self.fails: dict[str, deque] = {}
+
+    def _recent(self, key: str, now: float) -> deque:
+        q = self.fails.get(key)
+        if q is None:
+            if len(self.fails) >= self._MAX_TRACKED:
+                for k in sorted(self.fails, key=lambda k: self.fails[k][-1] if self.fails[k] else 0)[: self._MAX_TRACKED // 2]:
+                    del self.fails[k]
+            q = self.fails[key] = deque()
+        while q and now - q[0] > self.WINDOW:
+            q.popleft()
+        return q
+
+    def admit(self, name: str, ip: str, account_ip: str | None = None) -> str | None:
+        """Reserve the lobby for this name and address; returns a kick message when refused."""
+        key, now = name.lower(), time.time()
+        if len(self._recent(f"ip:{ip}", now)) >= self.IP_FAILS or (
+                len(self._recent(f"name:{key}", now)) >= self.NAME_FAILS
+                and not (account_ip and _same_ip(account_ip, ip))):
+            return "Zbyt wiele nieudanych prób logowania. Spróbuj ponownie za kilka minut."
+        owner = self.owners.get(key)
+        if owner and not _same_ip(owner[0], ip):
+            return "Ktoś inny loguje się teraz na ten nick. Spróbuj ponownie za chwilę."
+        self.owners[key] = (ip, (owner[1] if owner else 0) + 1)
+        return None
+
+    def release(self, name: str, ip: str, *, failed: bool = False) -> None:
+        key = name.lower()
+        owner = self.owners.get(key)
+        if owner and _same_ip(owner[0], ip):
+            if owner[1] <= 1:
+                del self.owners[key]
+            else:
+                self.owners[key] = (owner[0], owner[1] - 1)
+        if failed:
+            now = time.time()
+            self._recent(f"ip:{ip}", now).append(now)
+            self._recent(f"name:{key}", now).append(now)
+
+
 class MinecraftProxy:
     def __init__(self, manager: "Manager", host: str, port: int):
         self.m = manager
@@ -145,6 +218,7 @@ class MinecraftProxy:
         self.http_served = 0
         # server id -> lowercase player name -> client socket of the live game connection
         self.sessions: dict[str, dict[str, object]] = {}
+        self.lobby_gate = LobbyGate()
 
     def player_pings(self, sid: str) -> dict[str, int | None]:
         """Network round-trip time (ms) of each player's connection, read on demand from the kernel.
@@ -258,12 +332,20 @@ class MinecraftProxy:
         lobby = getattr(self.m, "auth_lobby", None)
         # Offline-mode servers use the hidden PicoLimbo lobby. Online-mode servers
         # retain Mojang's normal authentication and do not pass through it.
-        if player and not inst.online_mode and getattr(inst.cfg, "auth_enabled", True):
+        needs_auth = next_state in (2, 3) and not inst.online_mode and getattr(inst.cfg, "auth_enabled", True)
+        if needs_auth and not safe_player_name(player):
+            # Fail closed: a login the proxy cannot read must never reach the server unchecked.
+            raise ProtocolError("login without a readable player name")
+        if needs_auth:
             auth_ip = str(peer[0])
-            from .auth_sessions import touch, valid
+            from .auth_sessions import account_ip, touch, valid
             if not valid(player, auth_ip):
                 if not lobby or not lobby.running:
                     await self._reply_offline(reader, writer, next_state, "auth", inst, hostname)
+                    return
+                refused = self.lobby_gate.admit(player, auth_ip, account_ip(player))
+                if refused:
+                    await self._reply_offline(reader, writer, next_state, "auth", inst, hostname, message=refused)
                     return
                 from .auth_sessions import set_pending
                 set_pending(player, auth_ip)
@@ -294,6 +376,8 @@ class MinecraftProxy:
             port = target.port if target is lobby else target.cfg.internal_port
             up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
         except (OSError, asyncio.TimeoutError):
+            if target is lobby:
+                self.lobby_gate.release(auth_name, auth_ip)
             await self._reply_offline(reader, writer, next_state, "starting", inst, hostname)
             return
         if target is inst and inst.cfg.proxy_protocol:
@@ -390,7 +474,7 @@ class MinecraftProxy:
         return out.replace("\\n", "\n")
 
     async def _reply_offline(self, reader, writer, next_state: int, mode: str,
-                             inst: "ServerInstance | None", hostname: str) -> None:
+                             inst: "ServerInstance | None", hostname: str, message: str | None = None) -> None:
         s = self.m.settings
         try:
             if next_state == 1:
@@ -419,7 +503,7 @@ class MinecraftProxy:
                         writer.write(packet(1, body[pos:pos + 8]))
                         await writer.drain()
             else:
-                template = {"waking": s.kick_waking, "starting": s.kick_starting,
+                template = message or {"waking": s.kick_waking, "starting": s.kick_starting,
                             "auth": "Ten serwer wymaga logowania. Połącz się ponownie, aby się zarejestrować lub zalogować."}.get(
                     mode, s.kick_offline if inst else "§cNieznany serwer: {name}")
                 msg = {"text": plain_text(self.render(template, inst, hostname))}
@@ -518,7 +602,13 @@ class MinecraftProxy:
         try:
             t1 = asyncio.create_task(copy(c_r, s_w, True))
             t2 = asyncio.create_task(copy(s_r, c_w, False))
-            done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+            # A lobby visit is limited in time: nobody can hold a name's login slot forever.
+            done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED,
+                                               timeout=None if track else self.lobby_gate.LOGIN_TIMEOUT)
+            if not done:
+                for t in pending:
+                    t.cancel()
+                pending = set()
             # give the other direction a moment to flush (e.g. disconnect message)
             if pending:
                 await asyncio.wait(pending, timeout=5)
@@ -536,6 +626,9 @@ class MinecraftProxy:
             if auth_name and auth_ip:
                 if sniffer is not None:
                     sniffer.flush()
+                if not track:
+                    from .auth_sessions import valid
+                    self.lobby_gate.release(auth_name, auth_ip, failed=not valid(auth_name, auth_ip))
                 lobby_obj = getattr(self.m, "auth_lobby", None)
                 if lobby_obj:
                     lobby_obj.touch(auth_name, auth_ip)

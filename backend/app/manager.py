@@ -28,6 +28,7 @@ from .store import JsonStore
 log = logging.getLogger("minenode")
 
 DEFAULT_ICON = Path(__file__).resolve().parent / "assets" / "server-icon.png"
+BACKEND_HOST = "127.0.0.1"  # game servers listen on loopback only; players reach them through the proxy
 
 
 def server_env(java: str | Path) -> dict[str, str]:
@@ -114,6 +115,7 @@ class ServerInstance:
         self._start_seq = 0
         self._autofix_count = 0
         self.players_store = JsonStore(PANEL_DIR / "players" / f"{cfg.id}.json", lambda: {"attempts": {}, "known": {}})
+        self._map_render = None
         self._load_log_history()
 
     def _load_log_history(self) -> None:
@@ -130,6 +132,14 @@ class ServerInstance:
             pass
 
     # ------------------------------------------------------------ helpers
+    @property
+    def map_render(self):
+        """squaremap full renders scheduled for the times nobody plays (squaremap.IdleRender)."""
+        if self._map_render is None:
+            from .squaremap import IdleRender
+            self._map_render = IdleRender(self)
+        return self._map_render
+
     @property
     def dir(self) -> Path:
         return SERVERS_DIR / self.cfg.id
@@ -377,8 +387,11 @@ class ServerInstance:
                 changes["motd"] = f"{self.cfg.name}"
             if "enable-status" not in props:
                 changes["enable-status"] = "true"
-        if props.get("server-ip"):
-            changes["server-ip"] = ""
+        # Players always come in through the MineNode proxy (which talks to 127.0.0.1). Listening on
+        # loopback only means nobody can reach the server port directly and skip the proxy's
+        # /login check (e.g. with host networking or a bare-metal install).
+        if props.get("server-ip") != BACKEND_HOST:
+            changes["server-ip"] = BACKEND_HOST
         if props.get("query.port") == "25565" or (initial and "query.port" not in props):
             changes["query.port"] = self.cfg.internal_port
         update_properties(path, changes)
@@ -559,6 +572,8 @@ class ServerInstance:
                 if m := r.search(plain):
                     self.record_attempt(m.group(1), None, "log")
                     break
+        elif "render" in plain and self.cfg.squaremap_enabled:
+            self.map_render.on_line(plain)
 
     def _players_changed(self) -> None:
         if self.online:
@@ -566,6 +581,8 @@ class ServerInstance:
         elif self.empty_since is None:
             self.empty_since = time.time()
         self.broadcast({"type": "players", "players": sorted(self.online), "count": len(self.online)})
+        if self.cfg.squaremap_enabled and self.online:
+            self.map_render.on_players(len(self.online))
 
     def _remember(self, name: str, uid: str | None) -> None:
         data = self.players_store.data
@@ -629,6 +646,8 @@ class ServerInstance:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(reader, 5)
         self.exit_code = code
+        if self._map_render is not None:
+            self._map_render.on_stop()
         self._touch_known(list(self.online))
         self.online.clear()
         self._players_changed()
@@ -942,6 +961,8 @@ class Manager:
                         inst.panel_log(f"Brak graczy od {idle} min – automatyczne wyłączanie serwera."
                                        + (" Uruchomi się sam, gdy ktoś spróbuje dołączyć." if inst.cfg.start_on_join else ""))
                         inst.spawn(inst.stop())
+                    if inst.cfg.squaremap_enabled:
+                        inst.map_render.tick(now)
                     if (inst.cfg.restart_daily_at == hhmm and inst.state == "online"
                             and inst._last_daily_restart != today):
                         inst._last_daily_restart = today

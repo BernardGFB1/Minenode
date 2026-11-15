@@ -18,6 +18,7 @@ def fresh_auth(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "_users", JsonStore(tmp_path / "users.json", dict))
     monkeypatch.setattr(auth, "_secret_file", tmp_path / "secret.key")
     monkeypatch.setattr(auth, "_attempts", {})
+    monkeypatch.setattr(auth, "_revoked", JsonStore(tmp_path / "revoked.json", dict))
     auth.create_user("admin", PASSWORD)
 
 
@@ -128,3 +129,39 @@ def test_idle_console_is_closed_when_the_account_is_deleted(ws_client, monkeypat
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_json()
     assert closed.value.code == 4401
+
+
+def test_logout_revokes_the_cookie_itself():
+    token = auth.login("admin", PASSWORD, "198.51.100.1")
+    other = auth.login("admin", PASSWORD, "198.51.100.1")  # e.g. another device
+    assert auth.verify_token(token) == "admin"
+    auth.revoke_token(token)
+    assert auth.verify_token(token) is None  # a copied cookie no longer works after "Wyloguj"
+    assert auth.verify_token(other) == "admin"
+
+
+def test_logout_endpoint_revokes_the_session():
+    app = FastAPI()
+    app.include_router(api.router)
+    client = TestClient(app)
+    token = auth.make_token("admin")
+    client.cookies.set(auth.COOKIE, token)
+    assert client.post("/api/auth/logout").status_code == 200
+    assert auth.verify_token(token) is None
+
+
+def test_recreated_account_does_not_revive_old_cookies():
+    auth.create_user("bob", "first-password-1")
+    old = auth.make_token("bob")
+    auth.delete_user("bob")
+    assert auth.verify_token(old) is None
+    auth.create_user("bob", "another-password-2")  # same name, token_version starts at 0 again
+    assert auth.verify_token(old) is None
+    assert auth.verify_token(auth.make_token("bob")) == "bob"
+
+
+def test_tokens_without_account_binding_are_refused():
+    import base64, hashlib, hmac, json, time
+    payload = base64.urlsafe_b64encode(json.dumps({"u": "admin", "exp": int(time.time()) + 60, "v": 0}).encode()).decode().rstrip("=")
+    sig = hmac.new(auth._secret(), payload.encode(), hashlib.sha256).hexdigest()
+    assert auth.verify_token(f"{payload}.{sig}") is None

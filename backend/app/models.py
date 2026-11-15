@@ -84,6 +84,7 @@ class ServerConfig(BaseModel):
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
     auth_enabled: bool = True  # routed through the hidden PicoLimbo lobby when offline-mode
     squaremap_enabled: bool = False  # live web map served by the panel under /map/<id>/
+    squaremap_idle_render: bool = True  # full map renders while nobody is online
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None

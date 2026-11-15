@@ -1,6 +1,6 @@
 <template>
   <div class="avatar" :style="{ width: size + 'px', height: size + 'px', '--c': meta.color, '--ink': meta.ink || '#10140f', fontSize: size * 0.36 + 'px' }">
-    <img v-if="server.has_icon && !failed" :src="`/api/servers/${server.id}/icon?v=${server.icon_version || 0}`" alt="" @error="failed = true" />
+    <img v-if="(src || server.has_icon) && !failed" :src="src || `/api/servers/${server.id}/icon?v=${server.icon_version || 0}`" alt="" @error="failed = true" />
     <img v-else-if="server.modpack?.icon_url && !failed2" :src="server.modpack.icon_url" alt="" referrerpolicy="no-referrer" @error="failed2 = true" />
     <span v-else>{{ meta.letter }}</span>
   </div>
@@ -8,10 +8,11 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ENGINE_META } from '../utils'
-const props = defineProps({ server: Object, size: { type: Number, default: 44 } })
+// src: an icon URL that works without a panel login (public server page)
+const props = defineProps({ server: Object, size: { type: Number, default: 44 }, src: String })
 const failed = ref(false)
 const failed2 = ref(false)
-watch(() => props.server.icon_version, () => (failed.value = false))
+watch(() => [props.server.icon_version, props.src], () => (failed.value = false))
 const meta = computed(() => ENGINE_META[props.server.type] || ENGINE_META.vanilla)
 </script>
 <style scoped>

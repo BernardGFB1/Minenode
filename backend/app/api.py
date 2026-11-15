@@ -121,7 +121,8 @@ async def auth_login(body: Credentials, request: Request, response: Response):
 
 
 @router.post("/auth/logout")
-async def auth_logout(response: Response):
+async def auth_logout(request: Request, response: Response):
+    auth.revoke_token(request.cookies.get(auth.COOKIE))
     response.delete_cookie(auth.COOKIE, path="/")
     return {"ok": True}
 
@@ -1802,11 +1803,14 @@ def _public_stats(inst: ServerInstance) -> dict:
             "max_players": _public_max_players(inst), "online_count": len(inst.online),
             "online_mode": inst.online_mode, "started_at": inst.started_at if inst.running else None,
             "uptime": int(time.time() - inst.started_at) if inst.running and inst.started_at else None,
-            "icon": f"/api/public/server-icon/{inst.cfg.id}?v={inst.icon_version()}",
+            "icon": (f"/api/public/server-icon/{inst.cfg.id}?v={inst.icon_version()}"
+                     if (inst.dir / "server-icon.png").is_file() else None),
+            "whitelist": props.get("white-list", "false") == "true",
         },
         "online": online,
         "offline": offline[:200],
-        "players": {"online": len(online), "offline": len(offline), "max": _public_max_players(inst)},
+        "players": {"online": len(online), "offline": len(offline), "known": len(online) + len(offline),
+                    "max": _public_max_players(inst)},
         "map": {
             "enabled": inst.cfg.squaremap_enabled,
             "available": map_ready,
@@ -1919,12 +1923,18 @@ async def squaremap_get(sid: str, _: str = Depends(auth.require_user)):
 
 class SquaremapBody(BaseModel):
     enabled: bool
+    idle_render: Optional[bool] = None  # full renders while nobody plays
 
 
 @router.post("/servers/{sid}/squaremap")
 @run_errors
 async def squaremap_set(sid: str, body: SquaremapBody, _: str = Depends(auth.require_user)):
     inst = inst_or_404(sid)
+    if body.idle_render is not None and body.idle_render != inst.cfg.squaremap_idle_render:
+        inst.cfg.squaremap_idle_render = body.idle_render
+        manager.save_server(inst.cfg)
+        if body.enabled == inst.cfg.squaremap_enabled:  # only the render option changed
+            return {**await squaremap.state(inst), "restart_required": False}
     if body.enabled:
         if not squaremap.engine_supported(inst):
             raise HTTPException(400, "squaremap wymaga silnika obsługującego pluginy lub mody")

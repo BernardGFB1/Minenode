@@ -380,4 +380,155 @@ async def state(inst: "ServerInstance", refresh: bool = False) -> dict:
         "data_dir": rel_to_server(inst, data_dir(inst)),
         "web_dir": rel_to_server(inst, web_dir(inst)),
         "restart_required": False,
+        "idle_render": bool(getattr(inst.cfg, "squaremap_idle_render", True)),
+        "render": inst.map_render.status() if hasattr(inst, "map_render") else None,
     }
+
+
+# ====================================================================== render while nobody plays
+
+IDLE_RENDER_DELAY = 120   # seconds without players before a full render starts (or resumes)
+START_TIMEOUT = 45        # a world that does not confirm the command in time is skipped until restart
+WORLDS = ("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end")
+
+# squaremap's log lines (common/config/Messages.java). <world> is the dimension identifier.
+_RENDER_LOG = (
+    (re.compile(r"Started full map render for (\S+)"), "started"),
+    (re.compile(r"Rendering map for (\S+) has been resumed"), "started"),
+    (re.compile(r"A render is already in progress on (\S+)"), "started"),
+    (re.compile(r"Finished rendering map for (\S+)"), "finished"),
+    (re.compile(r"Rendering map for (\S+) has been interrupted"), "interrupted"),
+    (re.compile(r"Render cancelled for (\S+)"), "interrupted"),
+    (re.compile(r"Unpaused renders for (\S+)"), "unpaused"),
+    (re.compile(r"Paused renders for (\S+)"), "paused"),
+)
+_LABEL_RE = re.compile(r"^\s*main-command-label\s*:\s*['\"]?([A-Za-z0-9_-]+)", re.M)
+
+
+def _world_id(raw: str) -> str:
+    w = raw.strip().rstrip(".!,").lower()
+    return w if ":" in w else f"minecraft:{w}"
+
+
+def command_label(inst: "ServerInstance") -> str:
+    try:
+        m = _LABEL_RE.search((data_dir(inst) / "config.yml").read_text(encoding="utf-8"))
+    except OSError:
+        m = None
+    return m.group(1) if m else "squaremap"
+
+
+class IdleRender:
+    """Full squaremap renders run only while the server is empty.
+
+    After players have been on the server, every world is queued for a full render. Once nobody has
+    been online for IDLE_RENDER_DELAY seconds, the worlds are rendered one after another. When a
+    player joins, the running render is paused (squaremap keeps its progress) and it continues the
+    next time the server is empty. Interrupted renders resume from squaremap's own checkpoint.
+    """
+
+    def __init__(self, inst: "ServerInstance"):
+        self.inst = inst
+        self.rendering: str | None = None
+        self.paused = False
+        self.awaiting: tuple[str, float] | None = None
+        self.skipped: set[str] = set()
+        self._file = inst.dir / ".minenode" / "squaremap-render.json"
+        self.pending: list[str] = self._load()
+
+    # ---------------------------------------------------------------- persistence
+    def _load(self) -> list[str]:
+        import json
+        try:
+            data = json.loads(self._file.read_text(encoding="utf-8"))
+            return [w for w in data.get("pending", []) if isinstance(w, str)]
+        except (OSError, ValueError, AttributeError):
+            return list(WORLDS)  # never rendered by the panel yet
+
+    def _save(self) -> None:
+        import json
+        try:
+            self._file.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(self._file, json.dumps({"pending": self.pending}))
+        except OSError as exc:
+            log.warning("squaremap render state not saved: %s", exc)
+
+    # ---------------------------------------------------------------- state
+    def active(self) -> bool:
+        cfg = self.inst.cfg
+        return bool(cfg.squaremap_enabled and getattr(cfg, "squaremap_idle_render", True)
+                    and engine_supported(self.inst))
+
+    def status(self) -> dict:
+        return {"rendering": self.rendering, "paused": self.paused, "pending": list(self.pending),
+                "delay": IDLE_RENDER_DELAY}
+
+    def _send(self, *args: str) -> None:
+        cmd = " ".join((command_label(self.inst),) + args)
+        self.inst.spawn(self.inst.send_command(cmd, echo=False))
+
+    # ---------------------------------------------------------------- events from the server
+    def on_line(self, plain: str) -> None:
+        for pattern, kind in _RENDER_LOG:
+            m = pattern.search(plain)
+            if not m:
+                continue
+            world = _world_id(m.group(1))
+            if kind == "started":
+                self.rendering, self.awaiting = world, None
+            elif kind == "finished":
+                if world in self.pending:
+                    self.pending.remove(world)
+                    self._save()
+                if self.rendering == world:
+                    self.rendering, self.paused = None, False
+                    self.inst.panel_log(f"squaremap: mapa {world} jest wyrenderowana.")
+            elif kind == "interrupted":
+                if self.rendering == world:
+                    self.rendering, self.paused = None, False
+            elif kind == "paused":
+                self.paused = True
+            elif kind == "unpaused":
+                self.paused = False
+            return
+
+    def on_players(self, count: int) -> None:
+        if count <= 0:
+            return
+        if self.pending != list(WORLDS):  # somebody plays: the map will need a fresh render
+            self.pending = list(WORLDS)
+            self._save()
+        if self.rendering and not self.paused and self.inst.running:
+            self.paused = True  # confirmed by "Paused renders for …"
+            self._send("pauserender", self.rendering)
+            self.inst.panel_log("squaremap: gracz dołączył – renderowanie mapy wstrzymane do czasu, aż serwer opustoszeje.")
+
+    def on_stop(self) -> None:
+        self.rendering, self.paused, self.awaiting = None, False, None
+        self.skipped.clear()
+
+    # ---------------------------------------------------------------- timer (manager scheduler)
+    def tick(self, now: float) -> None:
+        inst = self.inst
+        if not self.active() or inst.state != "online" or inst.online:
+            return
+        if not inst.empty_since or now - inst.empty_since < IDLE_RENDER_DELAY:
+            return
+        if self.awaiting:
+            world, sent = self.awaiting
+            if now - sent < START_TIMEOUT:
+                return
+            self.skipped.add(world)  # unknown/disabled dimension or squaremap not loaded
+            self.awaiting = None
+        if self.rendering:
+            if self.paused:
+                self.paused = False
+                self._send("pauserender", self.rendering)  # the command toggles: resumes the render
+                inst.panel_log(f"squaremap: serwer jest pusty – wznawiam renderowanie mapy {self.rendering}.")
+            return
+        world = next((w for w in self.pending if w not in self.skipped), None)
+        if world is None or not is_installed(inst):
+            return
+        self.awaiting = (world, now)
+        self._send("fullrender", world)
+        inst.panel_log(f"squaremap: nikt nie gra – renderuję mapę {world}.")
