@@ -41,7 +41,7 @@
       </div>
 
       <nav class="tabs" style="margin-bottom: 20px">
-        <router-link v-for="t in tabs" :key="t.to" :to="`/servers/${id}${t.to}`" class="tab" :exact-active-class="'active'" :active-class="t.to ? 'active' : ''">
+        <router-link v-for="t in tabs" :key="t.to" :to="`/servers/${id}${t.to}`" class="tab" active-class="" exact-active-class="" :class="{ active: tabActive(t) }">
           <component :is="t.icon" /> {{ $t(t.label) }}
           <span v-if="t.badge" class="badge amber" style="height: 18px; padding: 0 6px">{{ t.badge }}</span>
         </router-link>
@@ -52,8 +52,8 @@
 </template>
 <script setup>
 import { computed, onUnmounted, provide, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { Loader2, Play, Square, RotateCcw, Zap, Globe, Copy, AlertTriangle, Gauge, TerminalSquare, Users, SlidersHorizontal, Coffee, FolderOpen, Archive, Settings2, Puzzle, Image, BarChart3, Blocks } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { Loader2, Play, Square, RotateCcw, Zap, Globe, Copy, AlertTriangle, Gauge, TerminalSquare, Users, SlidersHorizontal, FolderOpen, Archive, Settings2, BarChart3, Blocks } from 'lucide-vue-next'
 import ServerAvatar from '../../components/ServerAvatar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { api, connectServer } from '../../api'
@@ -63,6 +63,7 @@ import { ENGINE_META, copyText } from '../../utils'
 
 const props = defineProps({ id: String })
 const router = useRouter()
+const route = useRoute()
 const live = reactive({ summary: null, config: null, console: [], stats: [], job: null, connected: false, pendingCount: 0, tick: 0 })
 const pending = ref(false)
 let conn = null
@@ -76,14 +77,18 @@ const tabs = computed(() => [
   { to: '/console', label: 'Konsola', icon: TerminalSquare },
   { to: '/players', label: 'Gracze', icon: Users, badge: live.pendingCount || null },
   { to: '/game', label: 'Konfiguracja gry', icon: SlidersHorizontal },
-  ...(s.value?.type !== 'vanilla' ? [{ to: '/content', label: ['paper', 'purpur'].includes(s.value?.type) ? 'Pluginy' : 'Mody', icon: Puzzle }] : []),
   { to: '/addons', label: 'Dodatki', icon: Blocks },
-  { to: '/resourcepacks', label: 'Paczki zasobów', icon: Image },
-  { to: '/java', label: 'Java i start', icon: Coffee },
   { to: '/files', label: 'Pliki', icon: FolderOpen },
   { to: '/backups', label: 'Kopie zapasowe', icon: Archive },
   { to: '/settings', label: 'Ustawienia', icon: Settings2 },
 ])
+
+// Tabs with their own sub-pages (Dodatki, Ustawienia) stay highlighted on every sub-page; Przegląd only on itself.
+function tabActive(t) {
+  const base = `/servers/${props.id}`
+  const path = route.path.replace(/\/+$/, '')
+  return t.to ? path === base + t.to || path.startsWith(`${base}${t.to}/`) : path === base
+}
 
 async function load() {
   try {

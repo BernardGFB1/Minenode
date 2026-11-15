@@ -1,6 +1,6 @@
 <template>
   <div class="col" style="gap: 16px; max-width: 980px">
-    <div class="small muted">{{ $t('Dodatkowe, opcjonalne funkcje tego serwera. Każdą włączasz osobno – panel sam instaluje i konfiguruje to, czego potrzebuje.') }}</div>
+    <div class="small muted">{{ $t('Opcjonalne usługi tego serwera. Każdą włączasz osobno – panel sam instaluje i konfiguruje to, czego potrzebuje.') }}</div>
 
     <section class="card">
       <div class="card-head">

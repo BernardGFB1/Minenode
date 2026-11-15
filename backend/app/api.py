@@ -22,7 +22,7 @@ from starlette.background import BackgroundTask
 from starlette.websockets import WebSocketDisconnect
 
 from . import storage as storage_mod
-from . import bedrock_compat, packs, worldgen
+from . import bedrock_compat, datapacks as dpacks, packs, worldgen
 from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
 from . import chunky, squaremap
 from .models import ChunkySettings
@@ -1617,6 +1617,87 @@ async def content_delete(sid: str, file: str, _: str = Depends(auth.require_user
     inst = inst_or_404(sid)
     content.remove(inst, file)
     return {"ok": True, "restart_required": inst.running}
+
+
+# ====================================================================== datapacks
+
+@router.get("/servers/{sid}/datapacks")
+async def dp_list(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    return {"packs": await asyncio.to_thread(dpacks.list_packs, inst), "level": dpacks.level_name(inst),
+            "running": inst.running}
+
+
+@router.post("/servers/{sid}/datapacks/upload")
+@run_errors
+async def dp_upload(sid: str, file: UploadFile = File(...), _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = TMP_DIR / f"dp-upload-{uuid.uuid4().hex}.zip"
+    size = 0
+    with open(tmp, "wb") as fh:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > dpacks.MAX_SIZE:
+                fh.close()
+                tmp.unlink(missing_ok=True)
+                raise HTTPException(413, "Plik jest za duży (limit 512 MB)")
+            fh.write(chunk)
+    pack = await asyncio.to_thread(dpacks.add_file, inst, tmp, file.filename or "datapack.zip")
+    return pack | {"restart_required": inst.running}
+
+
+class DpInstall(BaseModel):
+    project_id: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/servers/{sid}/datapacks/install")
+@run_errors
+async def dp_install(sid: str, body: DpInstall, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    return await dpacks.install_modrinth(inst, body.project_id) | {"restart_required": inst.running}
+
+
+@router.get("/servers/{sid}/datapacks/search")
+@run_errors
+async def dp_search(sid: str, q: str = Query("", max_length=100), offset: int = 0, any_version: bool = False,
+                    _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    return await content.modrinth_search("datapack", q, offset, None if any_version else inst.cfg.mc_version, [])
+
+
+@router.post("/servers/{sid}/datapacks/toggle")
+@run_errors
+async def dp_toggle(sid: str, body: FileBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    try:
+        await asyncio.to_thread(dpacks.toggle, inst, body.file, body.enabled)
+    except FileNotFoundError:
+        raise HTTPException(404, "Datapack nie istnieje")
+    return {"ok": True, "restart_required": inst.running}
+
+
+@router.delete("/servers/{sid}/datapacks/{file}")
+@run_errors
+async def dp_delete(sid: str, file: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    try:
+        await asyncio.to_thread(dpacks.remove, inst, file)
+    except FileNotFoundError:
+        raise HTTPException(404, "Datapack nie istnieje")
+    return {"ok": True, "restart_required": inst.running}
+
+
+@router.get("/servers/{sid}/datapacks/{file}/icon")
+async def dp_icon(sid: str, file: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    try:
+        data = await asyncio.to_thread(dpacks.icon, inst, file)
+    except (FileNotFoundError, dpacks.DatapackError):
+        data = None
+    if not data:
+        raise HTTPException(404)
+    return Response(data, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
 
 # ====================================================================== resource packs

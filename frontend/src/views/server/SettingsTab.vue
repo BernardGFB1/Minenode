@@ -51,7 +51,7 @@
 
     <div class="row" style="justify-content: flex-end"><button class="btn primary" :disabled="saving" @click="save"><Save /> {{ $t('Zapisz ustawienia') }}</button></div>
 
-    <div class="callout info small"><Blocks /><div>{{ $t('Autoryzacja graczy, Voice Chat, Bedrock (Geyser), mapa z publiczną stroną i Chunky są teraz w zakładce') }} <router-link :to="`/servers/${id}/addons`">{{ $t('Dodatki') }}</router-link>.</div></div>
+    <div class="callout info small"><Blocks /><div>{{ $t('Autoryzacja graczy, Voice Chat, Bedrock (Geyser), mapa z publiczną stroną i Chunky są teraz w zakładce') }} <router-link :to="`/servers/${id}/addons/services`">{{ $t('Dodatki → Usługi') }}</router-link>.</div></div>
 
     <section class="card">
       <div class="card-head"><Wrench class="hi" /><h3>{{ $t('Silnik i wersja') }}</h3></div>
