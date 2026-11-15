@@ -431,6 +431,7 @@ const strings = {
   'Zmiany w server.properties zostaną zastosowane po restarcie serwera.': 'Changes to server.properties apply after a server restart.',
   'Restartuj teraz': 'Restart now',
   'Zapisano konfigurację': 'Configuration saved',
+  'Opóźnienie połączenia': 'Connection latency',
   'Flagi Aikara: pamięć startowa (-Xms) jest zawsze równa maksymalnej – stała sterta, mniej pauz GC.': "Aikar's flags: the start heap (-Xms) always equals the maximum – a fixed heap, fewer GC pauses.",
   'Zmiany zadziałają od następnego uruchomienia serwera': 'Changes apply from the next server start',
   'Zapisano – serwer uruchamia się ponownie': 'Saved – the server is restarting',

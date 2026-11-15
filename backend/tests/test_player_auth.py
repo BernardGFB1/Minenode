@@ -383,3 +383,43 @@ def test_logout_and_password_change_keep_the_fingerprint_until_account_removal()
     auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())
     auth_sessions.delete_account("steve")
     assert auth_sessions.fingerprint("steve") is None
+
+
+def test_bedrock_on_a_java_session_must_log_in_before_reaching_the_server():
+    """Java logged in, then Bedrock from the same address: refused already at the handshake."""
+    put_row()
+    assert auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot(),
+                                            edition="java") is False  # first capture binds the session
+    assert auth_sessions.valid("Steve", "203.0.113.7", 769, "java")
+    assert not auth_sessions.valid("Steve", "203.0.113.7", 769, "bedrock")
+    assert auth_sessions.sessions() == []  # logged out, password kept
+    assert not auth_sessions.valid("Steve", "203.0.113.7", 769, "java")
+
+
+def test_another_game_version_on_a_bound_session_must_log_in():
+    put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot(), edition="java")
+    assert not auth_sessions.valid("Steve", "203.0.113.7", 774, "java")
+
+
+def test_unbound_session_accepts_the_first_client_and_old_entries_without_edition():
+    put_row()
+    assert auth_sessions.valid("Steve", "203.0.113.7", 769, "bedrock")  # fresh /login: no binding yet
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot())  # no edition stored
+    assert auth_sessions.valid("Steve", "203.0.113.7", 769, "bedrock")
+
+
+def test_capture_reports_a_changed_client_so_the_proxy_can_disconnect_it():
+    put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, fingerprint_snapshot(), edition="java")
+    changed = fingerprint_snapshot(channel="fabric:registry/sync")
+    assert auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, changed, edition="java") is True
+
+
+def test_render_distance_is_deliberately_not_part_of_the_hash():
+    a, b = fingerprint_snapshot(), fingerprint_snapshot()
+    b["client_info"]["view_distance"] = 2
+    put_row()
+    auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, a)
+    assert not auth_sessions.record_fingerprint("Steve", "203.0.113.7", 769, b)
+    assert auth_sessions.valid("Steve", "203.0.113.7", 769)

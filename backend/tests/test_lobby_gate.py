@@ -178,3 +178,32 @@ def test_a_whitelist_kick_is_not_remembered_as_a_player(tmp_path, monkeypatch):
     inst.proxy_player_joined("Stranger")
     inst.proxy_player_left("Stranger")  # rejected within a second
     assert "stranger" not in inst.players_store.data.get("known", {})
+
+
+def test_geyser_connections_are_checked_as_bedrock_and_direct_ones_as_java(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from app import auth_sessions
+    from app.proxy import MinecraftProxy, proxy_v2_header
+    seen = []
+    monkeypatch.setattr(auth_sessions, "valid", lambda name, ip, protocol=None, edition=None: seen.append((ip, edition)) or False)
+    monkeypatch.setattr(auth_sessions, "set_pending", lambda *a: None)
+
+    async def no_reply(*a, **kw):
+        pass
+    monkeypatch.setattr(MinecraftProxy, "_reply_offline", no_reply)
+    inst = SimpleNamespace(online_mode=False, cfg=SimpleNamespace(auth_enabled=True, id="s1"), state="online",
+                           props=lambda: {})
+    lobby = SimpleNamespace(running=True, port=1)  # nothing listens: the route ends with a kick message
+    m = SimpleNamespace(resolve_host=lambda h: inst, auth_lobby=lobby, settings=SimpleNamespace(kick_starting="x"))
+
+    async def route(data, peer):
+        reader = asyncio.StreamReader()
+        reader.feed_data(data)
+        reader.feed_eof()
+        await MinecraftProxy(m, "127.0.0.1", 0)._route(reader, _Writer(), peer)
+
+    asyncio.run(route(_login(b"Steve"), ("203.0.113.7", 5000)))
+    geyser = proxy_v2_header(("198.51.100.20", 40000), ("127.0.0.1", 25565))
+    asyncio.run(route(geyser + _login(b"Steve"), ("127.0.0.1", 6000)))
+    assert seen == [("203.0.113.7", "java"), ("198.51.100.20", "bedrock")]

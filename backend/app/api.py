@@ -1784,9 +1784,11 @@ def _public_stats(inst: ServerInstance) -> dict:
     online_names = sorted(inst.online, key=str.lower)
     online_keys = {name.lower() for name in online_names}
     online = []
+    proxy = getattr(manager, "proxy", None)
+    pings = proxy.player_pings(inst.cfg.id) if proxy else {}  # measured now; None for Bedrock/loopback
     for name in online_names:
         entry = known.get(name.lower(), {})
-        online.append({"name": name, "uuid": entry.get("uuid"),
+        online.append({"name": name, "uuid": entry.get("uuid"), "ping": pings.get(name.lower()),
                        "joined_at": inst.online.get(name), "last_seen": entry.get("last_seen")})
     offline = [
         {"name": entry.get("name", key), "uuid": entry.get("uuid"), "last_seen": entry.get("last_seen") or 0}

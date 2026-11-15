@@ -100,7 +100,13 @@ def _pending_write(rows: dict[str, tuple[str, int]]) -> None:
     os.replace(tmp, PENDING_FILE)
 
 
-def valid(name: str, ip: str) -> bool:
+def valid(name: str, ip: str, protocol: int | None = None, edition: str | None = None) -> bool:
+    """Is there a live session for this name, address and – once bound – this kind of client?
+
+    ``protocol`` and ``edition`` ("java" / "bedrock") are known from the handshake, before the
+    connection reaches the server. A session bound by a Java client is not reused by a Bedrock
+    client (or another game version) from the same address: it has to log in again first.
+    """
     with _lock:
         data = _read()
         row = data.get(name.lower())
@@ -122,6 +128,17 @@ def valid(name: str, ip: str) -> bool:
                 row[5] = ""
             _write(data)
             return False
+        if stored_hash and current and current_hash == stored_hash:
+            was_protocol, was_edition = current.get("protocol"), current.get("edition")
+            if ((protocol is not None and was_protocol is not None and was_protocol != protocol)
+                    or (edition and was_edition and was_edition != edition)):
+                log.info("Auth %s: different client (%s %s -> %s %s); re-login required",
+                         name, was_edition or "?", was_protocol, edition or "?", protocol)
+                row[4] = "0"
+                if len(row) > 5:
+                    row[5] = ""
+                _write(data)
+                return False
         # Do not adopt a fingerprint here when the session has no binding yet.
         # The entry may describe the lobby connection (a different server) or
         # the previous client. The first target-server capture establishes the
@@ -348,7 +365,7 @@ def _fingerprint_public(entry: dict) -> dict:
 
 
 def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
-                       bind: bool = True) -> None:
+                       bind: bool = True, edition: str | None = None) -> bool:
     """Merge one proxy capture into the player's client fingerprint.
 
     Entries are keyed by player name and only shown while the stored IP matches
@@ -357,9 +374,12 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
     ``bind`` is true for a connection to the actual game server.  Lobby
     captures (``bind=False``) are informational only: the lobby is a different
     server, so its plugin-message set must never invalidate a valid session.
+
+    Returns True when this capture ended the session (a different client): the proxy then
+    disconnects the player at once instead of only logging the session out.
     """
     if not name or not snapshot:
-        return
+        return False
     now = int(time.time())
     with _lock:
         data = _fingerprints_read()
@@ -372,7 +392,7 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
             # lobby visit must not mix the lobby's different channel set into
             # the entry, because that would change the hash and invalidate a
             # perfectly valid session on the next connection.
-            return
+            return False
         # A newly registered/logged-in account has no binding yet. Do not
         # merge the previous client's channels into the new base fingerprint.
         if bind and session_row and not bound_hash:
@@ -402,12 +422,13 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
                 messages[channel] = dict(message)
 
         if not raw and not messages:
-            return
+            return False
 
         entry = {
             "name": name,
             "ip": ip,
             "protocol": protocol,
+            "edition": edition or old.get("edition"),
             "hash": _fingerprint_hash(protocol, raw, brand, list(messages)),
             "client_info_raw": raw,
             "client_info": _client_info_view(raw) if raw else None,
@@ -429,7 +450,7 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
             data = dict(keep)
         _fingerprints_write(data)
         if not bind:
-            return
+            return False
         sessions = _read()
         session = sessions.get(key)
         if session and _norm_ip(session[3]) == _norm_ip(ip) and _expiry(session) > now:
@@ -448,12 +469,14 @@ def record_fingerprint(name: str, ip: str, protocol: int, snapshot: dict, *,
                 if len(session) > 5:
                     session[5] = ""
                 _write(sessions)
+                return True
             else:
                 if len(session) > 5:
                     session[5] = entry["hash"]
                 else:
                     session.append(entry["hash"])
                 _write(sessions)
+        return False
 
 
 def fingerprint(name: str, ip: str | None = None) -> dict | None:

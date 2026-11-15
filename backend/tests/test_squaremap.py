@@ -264,7 +264,7 @@ def test_state_reports_update_and_public_urls(tmp_path, monkeypatch):
     assert state["data_dir"] == "plugins/squaremap"
 
 
-def test_public_stats_separates_online_and_offline(tmp_path):
+def test_public_stats_separates_online_and_offline(tmp_path, monkeypatch):
     from app.api import _public_stats
 
     class Store:
@@ -282,8 +282,11 @@ def test_public_stats_separates_online_and_offline(tmp_path):
         props=lambda: {"max-players": "30", "motd": "Hello"}, address=lambda: "play.example.com",
         online_mode=True, icon_version=lambda: 7,
     )
+    from app import api
+    monkeypatch.setattr(api, "manager", SimpleNamespace(proxy=SimpleNamespace(player_pings=lambda sid: {"steve": 42})), raising=False)
     stats = _public_stats(inst)
     assert [p["name"] for p in stats["online"]] == ["Steve"]
+    assert stats["online"][0]["ping"] == 42
     assert stats["online"][0]["joined_at"] == 200.0
     assert [p["name"] for p in stats["offline"]] == ["Alex", "Old"]
     assert stats["players"] == {"online": 1, "offline": 2, "known": 3, "max": 30}

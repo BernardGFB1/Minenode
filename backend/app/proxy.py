@@ -264,7 +264,7 @@ class MinecraftProxy:
             await self._close(writer)
         except _Piped as piped:
             await self._pipe(reader, writer, piped.r, piped.w, piped.inst, piped.player,
-                             piped.track, piped.auth_name, piped.auth_ip, piped.protocol)
+                             piped.track, piped.auth_name, piped.auth_ip, piped.protocol, piped.edition)
         except _Http as req:
             await self._serve_http(writer, req.method, req.path)
         except Exception:
@@ -275,7 +275,10 @@ class MinecraftProxy:
         # Geyser is configured to prefix its Java connection with a PROXY v2
         # header containing the real Bedrock address.  The header is only
         # trusted from loopback, so a public client cannot spoof its IP.
+        tcp_peer = peer
         first, peer, reader = await self._read_inbound_prefix(reader, peer)
+        # Geyser announces each Bedrock player with a PROXY header from loopback (see above).
+        edition = "bedrock" if peer is not tcp_peer else "java"
         if first == b"\xfe":  # legacy (<1.7) server list ping – not supported, close politely
             await self._close(writer)
             return
@@ -339,7 +342,7 @@ class MinecraftProxy:
         if needs_auth:
             auth_ip = str(peer[0])
             from .auth_sessions import account_ip, touch, valid
-            if not valid(player, auth_ip):
+            if not valid(player, auth_ip, protocol, edition):
                 if not lobby or not lobby.running:
                     await self._reply_offline(reader, writer, next_state, "auth", inst, hostname)
                     return
@@ -387,7 +390,7 @@ class MinecraftProxy:
         await up_w.drain()
         raise _Piped(up_r, up_w, inst, player if next_state in (2, 3) else None,
                      track=target is not lobby, auth_name=auth_name, auth_ip=auth_ip,
-                     protocol=protocol)
+                     protocol=protocol, edition=edition)
 
     async def _read_inbound_prefix(self, reader, peer) -> tuple[bytes, tuple, "_PrefixedReader"]:
         """Return the first handshake byte, the effective client address and a reader wrapper.
@@ -553,7 +556,7 @@ class MinecraftProxy:
 
     async def _pipe(self, c_r, c_w, s_r, s_w, inst: "ServerInstance", player: str | None = None,
                     track: bool = True, auth_name: str | None = None, auth_ip: str | None = None,
-                    protocol: int = -1) -> None:
+                    protocol: int = -1, edition: str = "java") -> None:
         sid = inst.cfg.id if track else "auth-lobby"
         self.active += 1
         if track:
@@ -575,9 +578,15 @@ class MinecraftProxy:
                 # Only a connection to the real game server establishes or
                 # invalidates the session binding. The hidden lobby is a
                 # different server and must never invalidate a fresh session.
-                record_fingerprint(auth_name, auth_ip, protocol, snapshot, bind=track)
+                if record_fingerprint(auth_name, auth_ip, protocol, snapshot, bind=track, edition=edition) and track:
+                    # A different client is on this session: logging the session out is not enough,
+                    # the connection that is already on the server is cut as well.
+                    log.info("Auth %s: client fingerprint changed – disconnecting", auth_name)
+                    asyncio.get_running_loop().call_soon(_cut, c_w, s_w)
 
             sniffer = PacketSniffer(protocol, on_capture=capture)
+            # Analyse the capture window on time even if the client goes quiet after joining.
+            capture_timer = asyncio.get_running_loop().call_later(sniffer.capture_seconds + 0.5, sniffer.freeze)
 
         async def copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter, up: bool) -> None:
             try:
@@ -626,6 +635,8 @@ class MinecraftProxy:
                     del live[key]
                     if not live:
                         self.sessions.pop(sid, None)
+            if sniffer is not None:
+                capture_timer.cancel()
             if joined:
                 inst.proxy_player_left(player)
             if auth_name and auth_ip:
@@ -704,15 +715,21 @@ class _Http(Exception):
         self.method, self.path = method, path
 
 
+def _cut(*writers) -> None:
+    for w in writers:
+        with contextlib.suppress(Exception):
+            w.transport.abort()
+
+
 class _Piped(Exception):
     """Control-flow signal: the handshake was routed, start piping outside of the timeout scope."""
 
     def __init__(self, r, w, inst, player=None, track=True, auth_name=None, auth_ip=None,
-                 protocol=-1):
+                 protocol=-1, edition="java"):
         super().__init__()
         self.r, self.w, self.inst, self.player = r, w, inst, player
         self.track, self.auth_name, self.auth_ip = track, auth_name, auth_ip
-        self.protocol = protocol
+        self.protocol, self.edition = protocol, edition
 
 
 def tcp_rtt_ms(sock) -> int | None:

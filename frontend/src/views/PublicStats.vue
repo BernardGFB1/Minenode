@@ -73,7 +73,8 @@
                   <div class="pname ellipsis">{{ p.name }}</div>
                   <div class="tiny muted">{{ $t('Na serwerze od {t}', { t: formatDuration(Math.max(0, now - (p.joined_at || now))) }) }}</div>
                 </div>
-                <span class="dot green" />
+                <span v-if="p.ping != null" class="pms num" :class="pingClass(p.ping)" :title="$t('Opóźnienie połączenia')">{{ p.ping }} ms</span>
+                <span v-else class="dot green" />
               </li>
             </ul>
           </section>
@@ -149,6 +150,7 @@ import ServerAvatar from '../components/ServerAvatar.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { api } from '../api'
+import { pingClass } from '../pings'
 import { t } from '../i18n'
 import { auth, toast, toggleTheme, ui } from '../store'
 import { copyText, ENGINE_META, formatDate, formatDuration, STATE, timeAgo } from '../utils'
@@ -238,6 +240,10 @@ onUnmounted(() => {
 .plist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .plist li:last-child { border-bottom: 0; }
 .dot.green { background: var(--accent); }
+.pms { font-size: 12px; color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; }
+.pms.green { color: var(--accent); }
+.pms.amber { color: var(--warn); }
+.pms.red { color: var(--danger); }
 .empty.small { padding: 36px 20px; font-size: 13px; }
 
 .steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: var(--text-2); }
