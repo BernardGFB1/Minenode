@@ -24,7 +24,8 @@ from starlette.websockets import WebSocketDisconnect
 from . import storage as storage_mod
 from . import bedrock_compat, packs, worldgen
 from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
-from . import squaremap
+from . import chunky, squaremap
+from .models import ChunkySettings
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
@@ -1959,6 +1960,76 @@ async def squaremap_set(sid: str, body: SquaremapBody, _: str = Depends(auth.req
     manager.save_server(inst.cfg)
     inst.panel_log("squaremap wyłączony.")
     return {**await squaremap.state(inst), "restart_required": inst.running}
+
+
+# ====================================================================== Chunky (world pre-generation)
+
+@router.get("/servers/{sid}/chunky")
+async def chunky_get(sid: str, refresh: bool = False, _: str = Depends(auth.require_user)):
+    return await chunky.state(inst_or_404(sid), refresh=refresh)
+
+
+@router.post("/servers/{sid}/chunky/install")
+@run_errors
+async def chunky_install(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    was = chunky.installed_info(inst)
+    result = await chunky.install(inst)
+    inst.panel_log(f"Chunky {result['version']} {'zaktualizowany' if was else 'zainstalowany'}.")
+    return {**await chunky.state(inst), "restart_required": inst.running, "installed_files": result["installed_files"]}
+
+
+@router.delete("/servers/{sid}/chunky")
+@run_errors
+async def chunky_remove(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    if inst.chunky_runner.active:
+        inst.chunky_runner.cancel()
+    await asyncio.to_thread(chunky.remove, inst)
+    inst.panel_log("Chunky odinstalowany.")
+    return {**await chunky.state(inst), "restart_required": inst.running}
+
+
+@router.put("/servers/{sid}/chunky/settings")
+@run_errors
+async def chunky_settings(sid: str, body: ChunkySettings, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    multicore_changed = body.multicore != inst.cfg.chunky.multicore
+    previous = inst.cfg.chunky
+    inst.cfg.chunky = body
+    if multicore_changed:
+        try:
+            await chunky.set_multicore(inst, body.multicore)
+        except Exception:
+            inst.cfg.chunky = previous
+            raise
+    manager.save_server(inst.cfg)
+    return {**await chunky.state(inst), "restart_required": bool(multicore_changed and inst.running)}
+
+
+class ChunkyAction(BaseModel):
+    action: Literal["start", "pause", "continue", "cancel"]
+
+
+@router.post("/servers/{sid}/chunky/action")
+@run_errors
+async def chunky_action(sid: str, body: ChunkyAction, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    if not chunky.installed_info(inst):
+        raise HTTPException(400, "Najpierw zainstaluj Chunky")
+    runner = inst.chunky_runner
+    if body.action == "start":
+        if inst.state != "online":
+            raise HTTPException(400, "Uruchom serwer, aby zacząć generowanie świata")
+        runner.start()
+    elif body.action == "pause":
+        runner.pause()
+    elif body.action == "continue":
+        runner.resume()
+    else:
+        runner.cancel()
+    await asyncio.sleep(0.3)  # let Chunky answer the first commands
+    return await chunky.state(inst)
 
 
 # ====================================================================== Bedrock Edition (Geyser)

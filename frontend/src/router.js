@@ -20,6 +20,7 @@ const routes = [
       { path: 'players', name: 'server-players', component: () => import('./views/server/PlayersTab.vue') },
       { path: 'game', name: 'server-game', component: () => import('./views/server/PropertiesTab.vue') },
       { path: 'content', name: 'server-content', component: () => import('./views/server/ContentTab.vue') },
+      { path: 'addons', name: 'server-addons', component: () => import('./views/server/AddonsTab.vue') },
       { path: 'resourcepacks', name: 'server-resourcepacks', component: () => import('./views/server/ResourcePacksTab.vue') },
       { path: 'java', name: 'server-java', component: () => import('./views/server/JavaTab.vue') },
       { path: 'files', name: 'server-files', component: () => import('./views/server/FilesTab.vue') },

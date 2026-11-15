@@ -53,7 +53,7 @@
 <script setup>
 import { computed, onUnmounted, provide, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Loader2, Play, Square, RotateCcw, Zap, Globe, Copy, AlertTriangle, Gauge, TerminalSquare, Users, SlidersHorizontal, Coffee, FolderOpen, Archive, Settings2, Puzzle, Image, BarChart3 } from 'lucide-vue-next'
+import { Loader2, Play, Square, RotateCcw, Zap, Globe, Copy, AlertTriangle, Gauge, TerminalSquare, Users, SlidersHorizontal, Coffee, FolderOpen, Archive, Settings2, Puzzle, Image, BarChart3, Blocks } from 'lucide-vue-next'
 import ServerAvatar from '../../components/ServerAvatar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { api, connectServer } from '../../api'
@@ -77,6 +77,7 @@ const tabs = computed(() => [
   { to: '/players', label: 'Gracze', icon: Users, badge: live.pendingCount || null },
   { to: '/game', label: 'Konfiguracja gry', icon: SlidersHorizontal },
   ...(s.value?.type !== 'vanilla' ? [{ to: '/content', label: ['paper', 'purpur'].includes(s.value?.type) ? 'Pluginy' : 'Mody', icon: Puzzle }] : []),
+  { to: '/addons', label: 'Dodatki', icon: Blocks },
   { to: '/resourcepacks', label: 'Paczki zasobów', icon: Image },
   { to: '/java', label: 'Java i start', icon: Coffee },
   { to: '/files', label: 'Pliki', icon: FolderOpen },

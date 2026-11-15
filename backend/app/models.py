@@ -24,6 +24,19 @@ class JavaConfig(BaseModel):
     extra_server_args: str = ""
 
 
+class ChunkySettings(BaseModel):
+    """World pre-generation with Chunky (Add-ons tab)."""
+    world: Literal["overworld", "the_nether", "the_end"] = "overworld"
+    shape: Literal["square", "circle", "rectangle", "ellipse", "diamond", "pentagon", "hexagon", "star",
+                   "triangle"] = "square"
+    pattern: Literal["concentric", "loop", "spiral"] = "concentric"
+    center_x: int = Field(default=0, ge=-30_000_000, le=30_000_000)
+    center_z: int = Field(default=0, ge=-30_000_000, le=30_000_000)
+    radius: int = Field(default=2000, ge=16, le=1_000_000)  # blocks from the center
+    only_when_empty: bool = True  # pause while players are online
+    multicore: bool = False  # Paper: worker-threads = cores - 1; Fabric/Quilt: C2ME
+
+
 class BackupSchedule(BaseModel):
     enabled: bool = False
     interval_hours: float = Field(default=24, gt=0, le=24 * 30)
@@ -85,6 +98,7 @@ class ServerConfig(BaseModel):
     auth_enabled: bool = True  # routed through the hidden PicoLimbo lobby when offline-mode
     squaremap_enabled: bool = False  # live web map served by the panel under /map/<id>/
     squaremap_idle_render: bool = True  # full map renders while nobody is online
+    chunky: ChunkySettings = ChunkySettings()
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None

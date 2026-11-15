@@ -122,6 +122,7 @@ class ServerInstance:
         self._autofix_count = 0
         self.players_store = JsonStore(PANEL_DIR / "players" / f"{cfg.id}.json", lambda: {"attempts": {}, "known": {}})
         self._map_render = None
+        self._chunky = None
         self._proxy_players: dict[str, list] = {}  # lowercase name -> [name, open connections, since]
         self._load_log_history()
 
@@ -146,6 +147,14 @@ class ServerInstance:
             from .squaremap import IdleRender
             self._map_render = IdleRender(self)
         return self._map_render
+
+    @property
+    def chunky_runner(self):
+        """World pre-generation with Chunky (chunky.ChunkyRunner)."""
+        if self._chunky is None:
+            from .chunky import ChunkyRunner
+            self._chunky = ChunkyRunner(self)
+        return self._chunky
 
     @property
     def dir(self) -> Path:
@@ -499,6 +508,12 @@ class ServerInstance:
                         await asyncio.to_thread(squaremap.write_config, self)
                 except Exception as exc:  # the map must never prevent the server from starting
                     self.panel_log(f"squaremap: nie udało się przygotować mapy – {exc}")
+            from . import chunky
+            if chunky.engine_supported(self) and chunky.installed_info(self):
+                try:
+                    await asyncio.to_thread(chunky.prepare, self)
+                except Exception as exc:  # noqa: BLE001 – never block a start
+                    self.panel_log(f"Chunky: nie udało się przygotować ustawień – {exc}")
             self.set_state("starting")
             try:
                 self._enforce_properties()
@@ -586,6 +601,8 @@ class ServerInstance:
                     break
         elif "render" in plain and self.cfg.squaremap_enabled:
             self.map_render.on_line(plain)
+        elif "Task " in plain or "No tasks" in plain:
+            self.chunky_runner.on_line(plain)
 
     def _is_online(self, name: str) -> bool:
         key = name.lower()
@@ -633,6 +650,8 @@ class ServerInstance:
         self.broadcast({"type": "players", "players": sorted(self.online), "count": len(self.online)})
         if self.cfg.squaremap_enabled and self.online:
             self.map_render.on_players(len(self.online))
+        if self.online and self._chunky is not None:
+            self._chunky.on_players(len(self.online))
 
     def _remember(self, name: str, uid: str | None) -> None:
         data = self.players_store.data
@@ -698,6 +717,8 @@ class ServerInstance:
         self.exit_code = code
         if self._map_render is not None:
             self._map_render.on_stop()
+        if self._chunky is not None:
+            self._chunky.on_stop()
         self._touch_known(list(self.online))
         self.online.clear()
         self._proxy_players.clear()
@@ -1014,6 +1035,8 @@ class Manager:
                         inst.spawn(inst.stop())
                     if inst.cfg.squaremap_enabled:
                         inst.map_render.tick(now)
+                    if inst.state == "online" and inst.chunky_runner.active:
+                        inst.chunky_runner.tick(now)
                     if (inst.cfg.restart_daily_at == hhmm and inst.state == "online"
                             and inst._last_daily_restart != today):
                         inst._last_daily_restart = today
