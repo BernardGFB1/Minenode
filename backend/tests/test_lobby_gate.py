@@ -127,3 +127,54 @@ def test_login_with_an_unreadable_name_is_refused_not_passed_through(monkeypatch
     for name in (b"a" * 40, b"evil\nadmin", b""):
         with pytest.raises(ProtocolError):
             _route(_login(name), monkeypatch)
+
+
+# ---------------------------------------------------------------- who is online
+
+def _instance(tmp_path, monkeypatch):
+    from app import manager
+    from app.models import ServerConfig
+    from app.store import JsonStore
+    monkeypatch.setattr(manager, "SERVERS_DIR", tmp_path)
+    monkeypatch.setattr(manager, "JsonStore", lambda path, default: JsonStore(tmp_path / "players.json", default))
+    cfg = ServerConfig(id="s1", name="S", type="purpur", mc_version="26.3", subdomain="s", internal_port=25600)
+    from types import SimpleNamespace
+    inst = manager.ServerInstance(SimpleNamespace(voice=None), cfg)
+    inst.broadcast = lambda msg: None
+    return inst
+
+
+def test_new_system_chat_join_and_leave_lines_are_recognised(tmp_path, monkeypatch):
+    inst = _instance(tmp_path, monkeypatch)
+    inst._parse_line("[17:00:49 INFO]: System chat: zlotyzabek joined the game")
+    assert list(inst.online) == ["zlotyzabek"]
+    inst._parse_line("[17:10:02 INFO]: System chat: zlotyzabek left the game")
+    assert inst.online == {}
+
+
+def test_custom_join_messages_still_count_through_the_login_line(tmp_path, monkeypatch):
+    inst = _instance(tmp_path, monkeypatch)
+    inst._parse_line("[12:00:00 INFO]: Steve[/203.0.113.7:50000] logged in with entity id 123 at ([world]0, 64, 0)")
+    inst._parse_line("[12:00:00 INFO]: §6Witaj §eSteve§6 na serwerze!")  # EssentialsX custom message
+    assert list(inst.online) == ["Steve"]
+    inst._parse_line("[12:30:00 INFO]: Steve lost connection: Disconnected")
+    assert inst.online == {}
+
+
+def test_proxy_connections_define_who_is_online(tmp_path, monkeypatch):
+    inst = _instance(tmp_path, monkeypatch)
+    inst.proxy_player_joined(".BedrockKid")          # Geyser name: never matches the log patterns
+    inst._parse_line("[12:00:01 INFO]: .BedrockKid joined the game")
+    assert list(inst.online) == [".BedrockKid"]
+    inst.proxy_player_joined(".bedrockkid")          # quick reconnect before the old socket closed
+    inst.proxy_player_left(".BedrockKid")
+    assert list(inst.online) == [".BedrockKid"]
+    inst.proxy_player_left(".bedrockkid")
+    assert inst.online == {}
+
+
+def test_a_whitelist_kick_is_not_remembered_as_a_player(tmp_path, monkeypatch):
+    inst = _instance(tmp_path, monkeypatch)
+    inst.proxy_player_joined("Stranger")
+    inst.proxy_player_left("Stranger")  # rejected within a second
+    assert "stranger" not in inst.players_store.data.get("known", {})

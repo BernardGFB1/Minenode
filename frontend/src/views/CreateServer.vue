@@ -56,7 +56,7 @@
             </div>
             <div class="field">
               <label>{{ $t('Pamięć RAM') }}</label>
-              <RamPicker v-model:min="form.java.min_ram_mb" v-model:max="form.java.max_ram_mb" :total-bytes="sys?.mem_total" :other-bytes="otherBytes" />
+              <RamPicker :fixed-min="form.java.flags_preset === 'aikar'" v-model:min="form.java.min_ram_mb" v-model:max="form.java.max_ram_mb" :total-bytes="sys?.mem_total" :other-bytes="otherBytes" />
             </div>
             <label class="eula">
               <input v-model="form.eula" type="checkbox" />

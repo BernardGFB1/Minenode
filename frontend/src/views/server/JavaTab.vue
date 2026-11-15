@@ -41,7 +41,7 @@
       <section class="card">
         <div class="card-head"><MemoryStick class="hi" /><h3>{{ $t('Pamięć') }}</h3></div>
         <div class="card-body">
-          <RamPicker v-model:min="j.min_ram_mb" v-model:max="j.max_ram_mb" :total-bytes="info.mem_total" :other-bytes="info.allocated_other" />
+          <RamPicker :fixed-min="j.flags_preset === 'aikar'" v-model:min="j.min_ram_mb" v-model:max="j.max_ram_mb" :total-bytes="info.mem_total" :other-bytes="info.allocated_other" />
         </div>
       </section>
 
@@ -86,7 +86,11 @@
       <div v-if="dirty" class="savebar card" style="grid-column: 1 / -1">
         <span class="small">{{ $t('Niezapisane zmiany ustawień uruchamiania') }}</span><span class="spacer" />
         <button class="btn ghost" @click="reset">{{ $t('Odrzuć') }}</button>
-        <button class="btn primary" :disabled="saving" @click="save"><Save /> {{ $t('Zapisz') }}</button>
+        <template v-if="live.summary.state === 'online'">
+          <button class="btn" :disabled="saving" :title="$t('Zmiany zadziałają od następnego uruchomienia serwera')" @click="save(false)"><Save /> {{ $t('Zapisz') }}</button>
+          <button class="btn primary" :disabled="saving" @click="save(true)"><RotateCcw /> {{ $t('Zapisz i uruchom ponownie') }}</button>
+        </template>
+        <button v-else class="btn primary" :disabled="saving" @click="save(false)"><Save /> {{ $t('Zapisz') }}</button>
       </div>
     </Transition>
   </div>
@@ -94,10 +98,10 @@
 </template>
 <script setup>
 import { computed, inject, onMounted, ref } from 'vue'
-import { Coffee, MemoryStick, Zap, Terminal, SquareTerminal, Copy, Save, AlertTriangle, Loader2, FileCode2 } from 'lucide-vue-next'
+import { Coffee, MemoryStick, Zap, Terminal, SquareTerminal, Copy, Save, AlertTriangle, Loader2, FileCode2, RotateCcw } from 'lucide-vue-next'
 import RamPicker from '../../components/RamPicker.vue'
 import { api } from '../../api'
-import { confirmDialog, toast, toastError } from '../../store'
+import { toast, toastError } from '../../store'
 import { copyText } from '../../utils'
 
 const live = inject('live')
@@ -137,13 +141,16 @@ async function load() {
 }
 onMounted(load)
 function reset() { j.value = JSON.parse(original.value) }
-async function save() {
+async function save(restart = false) {
   saving.value = true
   try {
     await api.patch(`/servers/${id}/config`, { java: j.value })
     await load()
-    if (live.summary.state === 'online' && (await confirmDialog({ title: 'Zapisano – zrestartować serwer?', message: 'Nowe ustawienia Javy zostaną użyte po restarcie.', confirmText: 'Restartuj' }))) {
+    if (restart && live.summary.state === 'online') {
       await api.post(`/servers/${id}/power`, { action: 'restart' })
+      toast('Zapisano – serwer uruchamia się ponownie', 'success')
+    } else if (live.summary.state === 'online') {
+      toast('Zapisano – zmiany zadziałają od następnego uruchomienia serwera', 'success', 4000)
     } else toast('Zapisano ustawienia uruchamiania', 'success')
   } catch (e) { toastError(e) } finally { saving.value = false }
 }

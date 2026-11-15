@@ -93,3 +93,37 @@ def test_server_java_is_on_path_for_launchers(tmp_path, monkeypatch):
     assert env["TERM"] == "xterm-256color"
     # a bare command name (no bin/ folder) leaves PATH alone
     assert server_env("java")["PATH"] == "/usr/bin:/bin"
+
+
+# ---------------------------------------------------------------- JVM flags (Aikar)
+
+AIKAR_ARTICLE = (  # https://aikar.co/2018/07/02/tuning-the-jvm-g1gc-garbage-collector-flags-for-minecraft/
+    "-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions "
+    "-XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 "
+    "-XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 "
+    "-XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 "
+    "-XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem "
+    "-XX:MaxTenuringThreshold=1 -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true"
+).split()
+AIKAR_OVER_12GB = {"-XX:G1NewSizePercent=40", "-XX:G1MaxNewSizePercent=50", "-XX:G1HeapRegionSize=16M",
+                   "-XX:G1ReservePercent=15", "-XX:InitiatingHeapOccupancyPercent=20"}
+
+
+def test_aikar_preset_is_exactly_the_published_flag_set():
+    from app.manager import jvm_flags
+    flags = jvm_flags("aikar", 10 * 1024, 21)
+    assert set(flags) - {"-XX:+IgnoreUnrecognizedVMOptions"} == set(AIKAR_ARTICLE)
+    big = set(jvm_flags("aikar", 16 * 1024, 21)) - {"-XX:+IgnoreUnrecognizedVMOptions"}
+    small_only = {f for f in AIKAR_ARTICLE if f.split("=")[0] in {g.split("=")[0] for g in AIKAR_OVER_12GB}}
+    assert big == (set(AIKAR_ARTICLE) - small_only) | AIKAR_OVER_12GB
+
+
+def test_aikar_preset_uses_the_same_xms_and_xmx(tmp_path):
+    jar(tmp_path, "server.jar")
+    inst = make_inst(tmp_path, target="server.jar")
+    inst.cfg.java.min_ram_mb, inst.cfg.java.max_ram_mb = 1024, 6144
+    cmd = ServerInstance.build_command(inst, "java", 21)
+    assert "-Xms6144M" in cmd and "-Xmx6144M" in cmd
+    inst.cfg.java.flags_preset = "none"  # without Aikar's flags the start heap stays configurable
+    cmd = ServerInstance.build_command(inst, "java", 21)
+    assert "-Xms1024M" in cmd and "-Xmx6144M" in cmd

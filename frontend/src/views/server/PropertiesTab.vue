@@ -71,7 +71,11 @@
         <span class="small"><b>{{ Object.keys(edits).length }}</b> {{ $t('niezapisanych zmian') }}</span>
         <span class="spacer" />
         <button class="btn ghost" @click="edits = {}">{{ $t('Odrzuć') }}</button>
-        <button class="btn primary" :disabled="saving" @click="save"><Save /> {{ live.summary.state === 'online' ? $t('Zapisz i uruchom ponownie') : $t('Zapisz') }}</button>
+        <template v-if="live.summary.state === 'online'">
+          <button class="btn" :disabled="saving" :title="$t('Zmiany zadziałają od następnego uruchomienia serwera')" @click="save(false)"><Save /> {{ $t('Zapisz') }}</button>
+          <button class="btn primary" :disabled="saving" @click="save(true)"><RotateCcw /> {{ $t('Zapisz i uruchom ponownie') }}</button>
+        </template>
+        <button v-else class="btn primary" :disabled="saving" @click="save(false)"><Save /> {{ $t('Zapisz') }}</button>
       </div>
     </Transition>
   </div>
@@ -79,7 +83,7 @@
 </template>
 <script setup>
 import { computed, inject, onMounted, ref } from 'vue'
-import { Sparkles, Globe2, ShieldCheck, Gauge, Image, Braces, Plus, Save, Info, Loader2 } from 'lucide-vue-next'
+import { Sparkles, Globe2, ShieldCheck, Gauge, Image, Braces, Plus, Save, Info, Loader2, RotateCcw } from 'lucide-vue-next'
 import Toggle from '../../components/Toggle.vue'
 import MotdEditor from '../../components/MotdEditor.vue'
 import ServerListEntry from '../../components/ServerListEntry.vue'
@@ -87,7 +91,7 @@ import ServerIconPicker from '../../components/ServerIconPicker.vue'
 import { refreshFleet } from '../../servers'
 import { GROUPS } from '../../data/properties'
 import { api } from '../../api'
-import { confirmDialog, toast, toastError } from '../../store'
+import { toast, toastError } from '../../store'
 
 const icons = { Sparkles, Globe2, ShieldCheck, Gauge, Image }
 const live = inject('live')
@@ -130,16 +134,17 @@ function addKey() {
   newVal.value = ''
 }
 
-async function save() {
+async function save(restart = false) {
   saving.value = true
   try {
     const r = await api.put(`/servers/${id}/properties`, { properties: edits.value })
     cur.value = r.properties
     edits.value = {}
-    if (live.summary.state === 'online') {
-      if (await confirmDialog({ title: 'Zapisano – uruchomić ponownie?', message: 'Zmiany w server.properties zostaną zastosowane po restarcie serwera.', confirmText: 'Restartuj teraz' })) {
-        await api.post(`/servers/${id}/power`, { action: 'restart' })
-      }
+    if (restart && live.summary.state === 'online') {
+      await api.post(`/servers/${id}/power`, { action: 'restart' })
+      toast('Zapisano – serwer uruchamia się ponownie', 'success')
+    } else if (live.summary.state === 'online') {
+      toast('Zapisano – zmiany zadziałają od następnego uruchomienia serwera', 'success', 4000)
     } else toast('Zapisano konfigurację', 'success')
   } catch (e) { toastError(e) } finally { saving.value = false }
 }

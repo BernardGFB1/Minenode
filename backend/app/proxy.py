@@ -562,6 +562,9 @@ class MinecraftProxy:
         key = player.lower() if player else None
         if track and key and sock is not None:
             self.sessions.setdefault(sid, {})[key] = sock
+        joined = getattr(inst, "proxy_player_joined", None) if track and player else None
+        if joined:
+            joined(player)  # the proxy, not the log, decides who is online
 
         sniffer = None
         if auth_name and auth_ip:
@@ -623,6 +626,8 @@ class MinecraftProxy:
                     del live[key]
                     if not live:
                         self.sessions.pop(sid, None)
+            if joined:
+                inst.proxy_player_left(player)
             if auth_name and auth_ip:
                 if sniffer is not None:
                     sniffer.flush()

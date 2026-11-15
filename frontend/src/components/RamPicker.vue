@@ -4,7 +4,7 @@
       <div class="big num">{{ formatMB(max) }}</div>
       <div class="muted small">{{ $t('maksymalnie (-Xmx)') }}</div>
       <div class="spacer" />
-      <div class="small text-2 num">{{ $t('start: {v}', { v: formatMB(Math.min(min, max)) }) }}</div>
+      <div class="small text-2 num">{{ $t('start: {v}', { v: formatMB(fixedMin ? max : Math.min(min, max)) }) }}</div>
     </div>
     <input type="range" :min="512" :max="limit" step="256" :value="max" @input="setMax(+$event.target.value)" />
     <div class="row wrap" style="gap: 6px">
@@ -25,7 +25,8 @@
         <AlertTriangle />{{ $t('Suma przydziałów przekracza pamięć hosta/kontenera – serwery mogą zostać zabite przez OOM.') }}
       </div>
     </div>
-    <details class="advanced">
+    <div v-if="fixedMin" class="hint tiny muted">{{ $t('Flagi Aikara: pamięć startowa (-Xms) jest zawsze równa maksymalnej – stała sterta, mniej pauz GC.') }}</div>
+    <details v-else class="advanced">
       <summary class="small text-2">{{ $t('Pamięć startowa (-Xms)') }}</summary>
       <div class="row" style="margin-top: 8px">
         <input type="range" :min="256" :max="max" step="256" :value="Math.min(min, max)" @input="$emit('update:min', +$event.target.value)" />
@@ -39,7 +40,8 @@
 import { computed } from 'vue'
 import { AlertTriangle } from 'lucide-vue-next'
 import { formatMB } from '../utils'
-const props = defineProps({ min: Number, max: Number, totalBytes: Number, otherBytes: { type: Number, default: 0 } })
+// fixedMin: Aikar's flags always start with -Xms = -Xmx, so the start heap is not configurable
+const props = defineProps({ min: Number, max: Number, totalBytes: Number, otherBytes: { type: Number, default: 0 }, fixedMin: Boolean })
 const emit = defineEmits(['update:min', 'update:max'])
 const totalMb = computed(() => (props.totalBytes ? Math.floor(props.totalBytes / 1048576) : 0))
 const otherMb = computed(() => Math.floor((props.otherBytes || 0) / 1048576))

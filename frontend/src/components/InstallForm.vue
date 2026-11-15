@@ -15,7 +15,7 @@
     </div>
     <div class="field">
       <label>{{ $t('Pamięć RAM') }} <span class="muted" style="font-weight: 400">{{ $t('– paczki modów zwykle potrzebują 6–10 GB') }}</span></label>
-      <RamPicker :min="modelValue.min_ram_mb" :max="modelValue.max_ram_mb" :total-bytes="sys?.mem_total"
+      <RamPicker :fixed-min="(modelValue.flags_preset || 'aikar') === 'aikar'" :min="modelValue.min_ram_mb" :max="modelValue.max_ram_mb" :total-bytes="sys?.mem_total"
                  @update:min="set('min_ram_mb', $event)" @update:max="set('max_ram_mb', $event)" />
     </div>
     <label class="eula">

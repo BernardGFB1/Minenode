@@ -45,8 +45,12 @@ def server_env(java: str | Path) -> dict[str, str]:
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 CTRL_RE = re.compile(r"\x1b\[[0-9;?]*[ABCDEFGHJKSTfhlnsu]|\x1b\][^\x07]*\x07|\r")
 NAME = r"([A-Za-z0-9_]{1,16})"
-JOIN_RE = re.compile(rf"\]: {NAME} joined the game")
-LEAVE_RE = re.compile(rf"\]: {NAME} left the game")
+# Newer servers (e.g. Purpur/Paper for 26.x) log broadcasts as "]: System chat: Steve joined the game".
+JOIN_RE = re.compile(rf"\]: (?:System chat: )?{NAME} joined the game")
+LEAVE_RE = re.compile(rf"\]: (?:System chat: )?{NAME} left the game")
+# Printed by the server itself whatever plugins do to the join/leave chat messages (EssentialsX etc.)
+LOGIN_RE = re.compile(rf"\]: {NAME}\[/[^\]]*\] logged in with entity id")
+LOST_RE = re.compile(rf"\]: {NAME} lost connection:")
 UUID_RE = re.compile(rf"UUID of player {NAME} is ([0-9a-fA-F-]{{32,36}})")
 DONE_RE = re.compile(r"Done \([\d.,]+s\)!")
 LIST_RE = re.compile(r"There are (\d+) of a max(?: of)? (\d+) players online:?\s*(.*)$")
@@ -57,10 +61,12 @@ WHITELIST_DENY_RES = [
     re.compile(rf"{NAME} lost connection: You are not white-?listed", re.I),
 ]
 
+# https://aikar.co/2018/07/02/tuning-the-jvm-g1gc-garbage-collector-flags-for-minecraft/ (mcflags.emc.gs).
+# Aikar's rules: the same -Xms and -Xmx, and the >12 GB variant of the young-generation settings.
 AIKAR = [
     "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200", "-XX:+UnlockExperimentalVMOptions",
     "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch", "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
-    "-XX:G1MixedGCLiveThresholdPercent=90", "-XX:G1RSetUpdatingPauseTimeTarget=5", "-XX:SurvivorRatio=32",
+    "-XX:G1MixedGCLiveThresholdPercent=90", "-XX:G1RSetUpdatingPauseTimePercent=5", "-XX:SurvivorRatio=32",
     "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold=1",
     "-Dusing.aikars.flags=https://mcflags.emc.gs", "-Daikars.new.flags=true",
 ]
@@ -116,6 +122,7 @@ class ServerInstance:
         self._autofix_count = 0
         self.players_store = JsonStore(PANEL_DIR / "players" / f"{cfg.id}.json", lambda: {"attempts": {}, "known": {}})
         self._map_render = None
+        self._proxy_players: dict[str, list] = {}  # lowercase name -> [name, open connections, since]
         self._load_log_history()
 
     def _load_log_history(self) -> None:
@@ -430,7 +437,10 @@ class ServerInstance:
         j = self.cfg.java
         if not self.cfg.launch:
             raise ServerError("Serwer nie jest zainstalowany")
-        cmd = [str(java), f"-Xms{min(j.min_ram_mb, j.max_ram_mb)}M", f"-Xmx{j.max_ram_mb}M"]
+        # Aikar: "set your Xms and Xmx to the same value" – a fixed heap, so AlwaysPreTouch and G1's
+        # region sizing work on the whole heap and the GC never resizes it under load.
+        xms = j.max_ram_mb if j.flags_preset == "aikar" else min(j.min_ram_mb, j.max_ram_mb)
+        cmd = [str(java), f"-Xms{xms}M", f"-Xmx{j.max_ram_mb}M"]
         cmd += jvm_flags(j.flags_preset, j.max_ram_mb, java_feature)
         cmd += ["-Dterminal.jline=false", "-Dterminal.ansi=true", "-Dlog4j2.formatMsgNoLookups=true",
                 "-Dfile.encoding=UTF-8", "-Djava.awt.headless=true"]
@@ -554,15 +564,17 @@ class ServerInstance:
             return
         if m := UUID_RE.search(plain):
             self._remember(m.group(1), m.group(2))
-        if m := JOIN_RE.search(plain):
-            self.online[m.group(1)] = time.time()
-            self._remember(m.group(1), None)
-            self._players_changed()
-        elif m := LEAVE_RE.search(plain):
+        if m := (JOIN_RE.search(plain) or LOGIN_RE.search(plain)):
             name = m.group(1)
-            self.online.pop(name, None)
-            self._touch_known([name])
-            self._players_changed()
+            if not self._is_online(name):
+                self.online[name] = time.time()
+                self._players_changed()
+            self._remember(name, None)
+        elif m := (LEAVE_RE.search(plain) or LOST_RE.search(plain)):
+            name = m.group(1)
+            if self._drop_online(name):
+                self._touch_known([name])
+                self._players_changed()
         elif m := LIST_RE.search(plain):
             names = [n.strip() for n in m.group(3).split(",") if n.strip()]
             self.online = {n: self.online.get(n, time.time()) for n in names if playersmod.NAME_RE.match(n)}
@@ -574,6 +586,44 @@ class ServerInstance:
                     break
         elif "render" in plain and self.cfg.squaremap_enabled:
             self.map_render.on_line(plain)
+
+    def _is_online(self, name: str) -> bool:
+        key = name.lower()
+        return any(n.lower() == key for n in self.online)
+
+    def _drop_online(self, name: str) -> bool:
+        key = name.lower()
+        found = [n for n in self.online if n.lower() == key]
+        for n in found:
+            del self.online[n]
+        return bool(found)
+
+    # The MineNode proxy sees every game connection (Java and Bedrock through Geyser), so it is the
+    # reliable source of who is online: join/leave log lines can be renamed or switched off by plugins,
+    # and Bedrock names (".Steve", spaces) never match the log patterns.
+    PROXY_PLAYED = 15  # seconds a connection must last to count as "played" (not a whitelist kick)
+
+    def proxy_player_joined(self, name: str) -> None:
+        key = name.lower()
+        entry = self._proxy_players.setdefault(key, [name, 0, time.time()])
+        entry[1] += 1
+        if not self._is_online(name):
+            self.online[name] = time.time()
+            self._players_changed()
+
+    def proxy_player_left(self, name: str) -> None:
+        key = name.lower()
+        entry = self._proxy_players.get(key)
+        if not entry:
+            return
+        entry[1] -= 1
+        if entry[1] > 0:  # a reconnect is already on its way in
+            return
+        del self._proxy_players[key]
+        if self._drop_online(name):
+            if time.time() - entry[2] >= self.PROXY_PLAYED:
+                self._touch_known([name])
+            self._players_changed()
 
     def _players_changed(self) -> None:
         if self.online:
@@ -650,6 +700,7 @@ class ServerInstance:
             self._map_render.on_stop()
         self._touch_known(list(self.online))
         self.online.clear()
+        self._proxy_players.clear()
         self._players_changed()
         self._ps = None
         uptime = time.time() - (self.started_at or time.time())
