@@ -83,6 +83,7 @@ class ServerConfig(BaseModel):
     voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
     auth_enabled: bool = True  # routed through the hidden PicoLimbo lobby when offline-mode
+    squaremap_enabled: bool = False  # live web map served by the panel under /map/<id>/
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
     launch: Optional[LaunchSpec] = None

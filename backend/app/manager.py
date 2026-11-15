@@ -294,6 +294,10 @@ class ServerInstance:
             launch, loader = await providers.install(self.cfg.type, ctx)
             self.cfg.launch = launch
             self.cfg.loader_version = loader
+            from . import squaremap
+            if self.cfg.squaremap_enabled and not squaremap.engine_supported(self):
+                self.cfg.squaremap_enabled = False
+                log("squaremap wyłączony – nowy silnik nie obsługuje pluginów ani modów.")
 
             if plan:
                 self.set_job("Instalacja modpacka", "Pobieranie modów", 0.6)
@@ -460,6 +464,18 @@ class ServerInstance:
                     if self.m.bedrock:
                         self.m.bedrock.request_apply()
                     self.panel_log(f"Bedrock wyłączony – nie udało się przygotować zgodności: {exc}")
+            from . import squaremap
+            if self.cfg.squaremap_enabled or squaremap.is_installed(self):
+                try:
+                    if self.cfg.squaremap_enabled:
+                        result = await squaremap.ensure(self)
+                        if result and result.get("updated"):
+                            self.panel_log(f"squaremap zaktualizowany do {result.get('version')}.")
+                    else:
+                        # A manually installed squaremap must not bind the panel's port.
+                        await asyncio.to_thread(squaremap.write_config, self)
+                except Exception as exc:  # the map must never prevent the server from starting
+                    self.panel_log(f"squaremap: nie udało się przygotować mapy – {exc}")
             self.set_state("starting")
             try:
                 self._enforce_properties()
@@ -530,7 +546,9 @@ class ServerInstance:
             self._remember(m.group(1), None)
             self._players_changed()
         elif m := LEAVE_RE.search(plain):
-            self.online.pop(m.group(1), None)
+            name = m.group(1)
+            self.online.pop(name, None)
+            self._touch_known([name])
             self._players_changed()
         elif m := LIST_RE.search(plain):
             names = [n.strip() for n in m.group(3).split(",") if n.strip()]
@@ -561,6 +579,24 @@ class ServerInstance:
         known[k] = entry
         self.players_store.save()
         self.bind_voice(name, entry.get("uuid"))
+
+    def _touch_known(self, names: list[str]) -> None:
+        """Refresh last_seen in one write (leaving the game / server shutdown)."""
+        data = self.players_store.data
+        known = data.setdefault("known", {})
+        now = time.time()
+        changed = False
+        for name in names:
+            if not playersmod.NAME_RE.match(name):
+                continue
+            k = name.lower()
+            entry = known.get(k, {"name": name})
+            entry["name"] = name
+            entry["last_seen"] = now
+            known[k] = entry
+            changed = True
+        if changed:
+            self.players_store.save()
 
     def bind_voice(self, name: str, uid: str | None) -> None:
         """Tell the voice proxy which server this player is on (UUID is in every SVC packet)."""
@@ -593,6 +629,7 @@ class ServerInstance:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(reader, 5)
         self.exit_code = code
+        self._touch_known(list(self.online))
         self.online.clear()
         self._players_changed()
         self._ps = None

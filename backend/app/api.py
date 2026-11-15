@@ -16,7 +16,7 @@ from typing import Any, Literal, Optional
 
 import psutil
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, WebSocket
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.websockets import WebSocketDisconnect
@@ -24,6 +24,7 @@ from starlette.websockets import WebSocketDisconnect
 from . import storage as storage_mod
 from . import bedrock_compat, packs, worldgen
 from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
+from . import squaremap
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
@@ -1751,6 +1752,107 @@ async def rp_public(sid: str, token: str, pid: str):
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
+# ====================================================================== public server page & squaremap map
+
+def _public_inst(key: str) -> ServerInstance:
+    """Resolve a public /<key>/stats path by id, subdomain or a slug of the server name.
+
+    Subdomains are unique, so they win over name slugs when both happen to match.
+    """
+    raw = key.strip().lower()
+    for inst in manager.instances.values():
+        if inst.cfg.id == key:
+            return inst
+    for inst in manager.instances.values():
+        if inst.cfg.subdomain.lower() == raw:
+            return inst
+    for inst in manager.instances.values():
+        if slugify(inst.cfg.name) == raw:
+            return inst
+    raise HTTPException(404, "Serwer nie istnieje")
+
+
+def _public_max_players(inst: ServerInstance) -> int:
+    value = inst.props().get("max-players", "20")
+    return int(value) if value.isdigit() else 20
+
+
+def _public_stats(inst: ServerInstance) -> dict:
+    props = inst.props()
+    known = inst.players_store.data.get("known", {})
+    online_names = sorted(inst.online, key=str.lower)
+    online_keys = {name.lower() for name in online_names}
+    online = []
+    for name in online_names:
+        entry = known.get(name.lower(), {})
+        online.append({"name": name, "uuid": entry.get("uuid"),
+                       "joined_at": inst.online.get(name), "last_seen": entry.get("last_seen")})
+    offline = [
+        {"name": entry.get("name", key), "uuid": entry.get("uuid"), "last_seen": entry.get("last_seen") or 0}
+        for key, entry in known.items() if key not in online_keys
+    ]
+    offline.sort(key=lambda p: p["last_seen"], reverse=True)
+    map_ready = squaremap.map_available(inst)
+    return {
+        "server": {
+            "id": inst.cfg.id, "name": inst.cfg.name, "subdomain": inst.cfg.subdomain,
+            "type": inst.cfg.type, "mc_version": inst.cfg.mc_version,
+            "loader_version": inst.cfg.loader_version, "state": inst.state, "running": inst.running,
+            "address": inst.address(), "motd": props.get("motd", "A Minecraft Server"),
+            "max_players": _public_max_players(inst), "online_count": len(inst.online),
+            "online_mode": inst.online_mode, "started_at": inst.started_at if inst.running else None,
+            "uptime": int(time.time() - inst.started_at) if inst.running and inst.started_at else None,
+            "icon": f"/api/public/server-icon/{inst.cfg.id}?v={inst.icon_version()}",
+        },
+        "online": online,
+        "offline": offline[:200],
+        "players": {"online": len(online), "offline": len(offline), "max": _public_max_players(inst)},
+        "map": {
+            "enabled": inst.cfg.squaremap_enabled,
+            "available": map_ready,
+            "url": squaremap.map_url(inst) if map_ready else None,
+        },
+    }
+
+
+@public_router.get("/api/public/servers/{key}/stats")
+async def public_server_stats(key: str):
+    return JSONResponse(_public_stats(_public_inst(key)), headers={"Cache-Control": "no-store"})
+
+
+@public_router.get("/api/public/server-icon/{sid}")
+async def public_server_icon(sid: str):
+    inst = manager.instances.get(sid)
+    if not inst:
+        raise HTTPException(404)
+    path = inst.dir / "server-icon.png"
+    if not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+@public_router.get("/map/{sid}/{path:path}", include_in_schema=False)
+async def squaremap_public_map(sid: str, path: str):
+    """Serve squaremap's generated web directory. The embedded squaremap HTTP server stays disabled."""
+    inst = manager.instances.get(sid)
+    if not inst or not inst.cfg.squaremap_enabled:
+        raise HTTPException(404)
+    root = squaremap.web_dir(inst).resolve()
+    rel = path or "index.html"
+    if rel.endswith("/"):
+        rel += "index.html"
+    target = (root / rel).resolve()
+    if not root.is_dir() or not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(404)
+    headers = {"X-Frame-Options": "SAMEORIGIN"}
+    if rel.startswith("assets/"):
+        headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        # Tile changes and the JSON documents that describe them are polled live by the map.
+        headers["Cache-Control"] = "no-cache"
+    return FileResponse(target, headers=headers)
+
+
 # ====================================================================== Simple Voice Chat
 
 def _voice_state(inst: ServerInstance) -> dict:
@@ -1806,6 +1908,45 @@ async def voice_install(sid: str, _: str = Depends(auth.require_user)):
     from .config import VOICE_PORT
     voice.write_config(inst, VOICE_PORT)
     return {**_voice_state(inst), "installed_files": ins.installed, "restart_required": inst.running}
+
+
+# ====================================================================== squaremap
+
+@router.get("/servers/{sid}/squaremap")
+async def squaremap_get(sid: str, _: str = Depends(auth.require_user)):
+    return await squaremap.state(inst_or_404(sid))
+
+
+class SquaremapBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/servers/{sid}/squaremap")
+@run_errors
+async def squaremap_set(sid: str, body: SquaremapBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    if body.enabled:
+        if not squaremap.engine_supported(inst):
+            raise HTTPException(400, "squaremap wymaga silnika obsługującego pluginy lub mody")
+        was_enabled = inst.cfg.squaremap_enabled
+        inst.cfg.squaremap_enabled = True
+        try:
+            result = await squaremap.ensure(inst, refresh=True)
+        except Exception:
+            inst.cfg.squaremap_enabled = was_enabled
+            raise
+        manager.save_server(inst.cfg)
+        version = (result or {}).get("version") or "?"
+        inst.panel_log(f"squaremap {version} gotowy – mapa: {squaremap.public_url(inst)}")
+        state = await squaremap.state(inst)
+        return {**state, "restart_required": inst.running,
+                "installed_files": (result or {}).get("installed_files", []),
+                "updated": bool((result or {}).get("updated"))}
+    inst.cfg.squaremap_enabled = False
+    await asyncio.to_thread(squaremap.disable_jar, inst)
+    manager.save_server(inst.cfg)
+    inst.panel_log("squaremap wyłączony.")
+    return {**await squaremap.state(inst), "restart_required": inst.running}
 
 
 # ====================================================================== Bedrock Edition (Geyser)

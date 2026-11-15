@@ -9,6 +9,7 @@ const routes = [
   { path: '/modpacks', name: 'modpacks', component: () => import('./views/Modpacks.vue') },
   { path: '/auth', name: 'auth', component: () => import('./views/Auth.vue') },
   { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
+  { path: '/:key/stats', name: 'server-stats', component: () => import('./views/PublicStats.vue'), meta: { public: true } },
   {
     path: '/servers/:id',
     component: () => import('./views/server/ServerView.vue'),

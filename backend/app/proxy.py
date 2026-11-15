@@ -30,6 +30,12 @@ HANDSHAKE_TIMEOUT = 8
 MAX_HANDSHAKE = 2048
 PROXY_V2_SIG = b"\r\n\r\n\x00\r\nQUIT\n"
 TCP_CONNECTION_INFO = 0x106  # macOS equivalent of Linux TCP_INFO
+FORMATTING_RE = re.compile("\u00a7.")
+
+
+def plain_text(text: str) -> str:
+    """Drop Minecraft formatting codes: Bedrock kick screens would show them literally."""
+    return FORMATTING_RE.sub("", text)
 
 
 class ProtocolError(Exception):
@@ -416,7 +422,7 @@ class MinecraftProxy:
                 template = {"waking": s.kick_waking, "starting": s.kick_starting,
                             "auth": "Ten serwer wymaga logowania. Połącz się ponownie, aby się zarejestrować lub zalogować."}.get(
                     mode, s.kick_offline if inst else "§cNieznany serwer: {name}")
-                msg = {"text": self.render(template, inst, hostname)}
+                msg = {"text": plain_text(self.render(template, inst, hostname))}
                 writer.write(packet(0, mc_string(json.dumps(msg, ensure_ascii=False))))
                 await writer.drain()
         finally:
