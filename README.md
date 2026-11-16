@@ -103,7 +103,7 @@ The proxy reads the player UUID at the start of every SVC packet and forwards it
 
 ### Bedrock Edition (Geyser)
 
-MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser Standalone, using one shared Bedrock port (`19132` by default). Hostname routing, whitelist, *start on join*, player IPs and voice chat keep working exactly as for Java players: Geyser connects to the Java proxy as a normal Java client, forwards the address the player entered, and prefixes the connection with a PROXY v2 header carrying the real Bedrock address. The proxy accepts that header only from loopback, so a public client cannot spoof its IP.
+MineNode can expose selected servers to Minecraft Bedrock Edition through Geyser Standalone, using one shared Bedrock port (`19132` by default). Geyser runs with `advanced.bedrock.validate-bedrock-login: false`. Hostname routing, whitelist, *start on join*, player IPs and voice chat keep working exactly as for Java players: Geyser connects to the Java proxy as a normal Java client, forwards the address the player entered, and prefixes the connection with a PROXY v2 header carrying the real Bedrock address. The proxy accepts that header only from loopback, so a public client cannot spoof its IP.
 
 MineNode automatically checks the Java version supported by the current Geyser build and keeps Geyser updated from the official Downloads API. Older Paper/Purpur servers receive a managed ViaVersion plugin; Fabric servers receive ViaFabric and Fabric API. The gateway is restarted by itself after a Geyser update, while Minecraft servers are not restarted. Vanilla, Forge, NeoForge and Quilt servers are blocked when they need a translator that their loader cannot provide.
 

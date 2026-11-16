@@ -374,7 +374,7 @@ class BedrockProxy:
             "  signaling:\n"
             "    mode: builtin\n"
             f"    advertise-addresses: {advertise}\n"
-            "    stun-discovery: true\n"
+            "    stun-discovery: false\n"
             "java:\n"
             "  address: '127.0.0.1'\n"
             f"  port: {PROXY_PORT}\n"
@@ -393,6 +393,8 @@ class BedrockProxy:
             # Geyser prefixes the Java connection with a PROXY v2 header carrying
             # the real Bedrock address. The proxy trusts it only from loopback.
             "    use-haproxy-protocol: true\n"
+            "  bedrock:\n"
+            "    validate-bedrock-login: false\n"
             "log-player-ip-addresses: false\n"
             "enable-metrics: false\n"
             "debug-mode: false\n"
