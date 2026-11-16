@@ -64,6 +64,36 @@
       </section>
 
       <section class="card">
+        <div class="card-head">
+          <ScrollText /><h3>{{ $t('Logi Geysera (Bedrock)') }}</h3>
+          <span v-if="geyser.error" class="badge red">{{ $t('błąd') }}</span>
+          <span v-else-if="geyser.listening" class="badge green"><span class="dot" />{{ $t('bramka działa') }}</span>
+          <span v-else-if="geyser.enabled" class="badge amber">{{ $t('Uruchamianie…') }}</span>
+          <span v-else class="badge">{{ $t('wyłączony') }}</span>
+        </div>
+        <div class="card-body col" style="gap: 12px">
+          <div class="row wrap" style="gap: 8px">
+            <span class="small text-2 grow">{{ $t('Podgląd pracy bramki Bedrock – diagnostyka połączeń i NetherNet.') }}</span>
+            <button class="btn sm" :disabled="geyserBusy" @click="loadGeyserLogs(true)"><RefreshCw /> {{ $t('Odśwież') }}</button>
+            <button class="btn sm danger" :disabled="!geyser.entries.length || geyserBusy" @click="clearGeyserLogs"><Eraser /> {{ $t('Wyczyść logi') }}</button>
+          </div>
+          <div v-if="geyser.error" class="callout warn small"><AlertTriangle /><div>{{ geyser.error }}</div></div>
+          <div ref="geyserLogEl" class="geyser-log mono" @scroll="onGeyserScroll">
+            <div v-for="e in geyser.entries" :key="e.seq" class="gl" :class="geyserLevel(e.text)">
+              <span class="ts">{{ geyserTime(e.t) }}</span>
+              <span class="tx">{{ e.text }}</span>
+            </div>
+            <div v-if="!geyser.entries.length" class="empty">{{ geyser.enabled ? $t('Brak logów.') : $t('Brak logów – bramka Bedrock nie jest uruchomiona.') }}</div>
+          </div>
+          <div class="tiny muted">
+            {{ $t('Logi odświeżają się automatycznie co 3 sekundy.') }}
+            <span v-if="geyser.version"> · Geyser {{ geyser.version }}</span>
+            <span v-if="geyser.port"> · {{ $t('Port') }} <span class="mono">{{ geyser.port }}</span> TCP + UDP</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
         <div class="card-head"><MonitorSmartphone /><h3>{{ $t('Wygląd wyłączonych serwerów') }}</h3>
           <span class="small muted">{{ $t('to widzi gracz, gdy serwer nie działa') }}</span></div>
         <div class="card-body col" style="gap: 22px">
@@ -166,8 +196,8 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw, ScrollText, RefreshCw, Eraser, AlertTriangle } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
 import BackupDestinations from '../components/BackupDestinations.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
@@ -190,6 +220,12 @@ const users = ref([])
 const nu = reactive({ username: '', password: '' })
 const pw = reactive({ user: null, value: '' })
 const installed = computed(() => new Set(runtimes.value.map((r) => r.feature)))
+const geyser = reactive({ entries: [], epoch: 0, enabled: false, running: false, listening: false, error: null, version: '', port: null })
+const geyserLogEl = ref(null)
+let geyserTimer = null
+let geyserAfter = 0
+const geyserBusy = ref(false)
+let geyserStick = true
 const MOTD_KEYS = ['motd_offline', 'motd_starting', 'version_offline', 'version_starting', 'kick_offline', 'kick_starting', 'kick_waking']
 const PH = [
   { key: 'name', label: 'Nazwa serwera' }, { key: 'motd', label: 'MOTD serwera z server.properties' },
@@ -221,6 +257,61 @@ async function saveMotd() {
   } catch (e) { toastError(e) } finally { saving.value = false }
 }
 
+const GEYSER_LEVEL_RE = /\/(WARN|ERROR|FATAL)\]|\[(WARN|ERROR|FATAL)\]|^\s*(WARN|ERROR)\b/
+function geyserLevel(text) {
+  const m = (text || '').match(GEYSER_LEVEL_RE)
+  const lvl = m ? (m[1] || m[2] || m[3]).toLowerCase() : ''
+  return lvl === 'fatal' ? 'error' : lvl
+}
+const geyserTime = (t) => new Date((t || 0) * 1000).toLocaleTimeString(undefined, { hour12: false })
+function onGeyserScroll() {
+  const el = geyserLogEl.value
+  if (el) geyserStick = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+}
+function applyGeyserState(r) {
+  Object.assign(geyser, {
+    epoch: r.epoch, enabled: r.enabled, running: r.running, listening: r.listening,
+    error: r.error, version: r.version, port: r.port,
+  })
+}
+async function loadGeyserLogs(reset = false) {
+  if (geyserBusy.value) return
+  geyserBusy.value = true
+  try {
+    const previous = geyserAfter
+    let after = reset ? 0 : previous
+    let r = await api.get(`/bedrock/logs?after=${after}`)
+    if (after && (r.epoch !== geyser.epoch || r.next < after)) {
+      // Bufor wyczyszczono lub backend wystartował ponownie – pobierz go od początku.
+      r = await api.get('/bedrock/logs?after=0')
+      after = 0
+    }
+    const replace = reset || !after || r.epoch !== geyser.epoch || r.next < previous
+    geyser.entries = replace ? r.entries : [...geyser.entries, ...r.entries].slice(-800)
+    applyGeyserState(r)
+    geyserAfter = r.next
+    if (replace) geyserStick = true
+    await nextTick()
+    const el = geyserLogEl.value
+    if (el && geyserStick) el.scrollTop = el.scrollHeight
+  } catch { /* następne odświeżenie spróbuje ponownie */ } finally { geyserBusy.value = false }
+}
+async function clearGeyserLogs() {
+  if (!(await confirmDialog({
+    title: 'Wyczyścić logi Geysera?',
+    message: 'Logi znikną tylko z tego podglądu – Geyser działa dalej.',
+    confirmText: 'Wyczyść',
+    danger: true,
+  }))) return
+  try {
+    const r = await api.del('/bedrock/logs')
+    geyser.entries = r.entries
+    applyGeyserState(r)
+    geyserAfter = r.next
+    toast('Wyczyszczono logi Geysera', 'success')
+  } catch (e) { toastError(e) }
+}
+
 async function load() {
   try {
     const [st, j, u] = await Promise.all([api.get('/settings'), api.get('/java'), api.get('/users')])
@@ -231,6 +322,11 @@ async function load() {
   } catch (e) { toastError(e) }
 }
 onMounted(load)
+onMounted(() => {
+  loadGeyserLogs(true)
+  geyserTimer = setInterval(loadGeyserLogs, 3000)
+})
+onUnmounted(() => clearInterval(geyserTimer))
 
 async function save() {
   saving.value = true
@@ -273,4 +369,11 @@ async function removeUser(u) {
 .kick { background: #2a201a; border-radius: 4px; padding: 18px 14px; text-align: center; color: #fff; text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55); font-size: 15px; line-height: 1.35; }
 .kick-title { color: #aaa; margin-bottom: 10px; }
 .kick-msg { white-space: pre-wrap; }
+.card-head .badge .dot { background: currentColor; }
+.geyser-log { height: 240px; overflow: auto; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--console-bg); color: #cfd6d0; font-size: 12px; line-height: 1.55; }
+.geyser-log .gl { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+.geyser-log .ts { flex: none; color: #56605a; user-select: none; }
+.geyser-log .gl.warn .tx { color: #e3b866; }
+.geyser-log .gl.error .tx { color: #ef8478; }
+.geyser-log .empty { color: var(--muted); padding: 4px 0; }
 </style>

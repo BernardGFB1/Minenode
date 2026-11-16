@@ -50,6 +50,7 @@ ROUTER_VERSION = "1.0.6"
 DENIED_MESSAGE = ("Ten adres nie jest dostępny przez Bedrock Edition. "
                   "Włącz obsługę Bedrock dla serwera w panelu MineNode.")
 RESTART_DELAY = 60.0
+LOG_BUFFER = 800
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
@@ -148,6 +149,9 @@ class BedrockProxy:
         self.error: str | None = None
         self.listening = False
         self.log_tail: deque[str] = deque(maxlen=80)
+        self.log_entries: deque[dict] = deque(maxlen=LOG_BUFFER)
+        self._log_seq = 0
+        self._log_epoch = 0
         self._log_task: asyncio.Task | None = None
         self._watch_task: asyncio.Task | None = None
         self._apply_task: asyncio.Task | None = None
@@ -396,6 +400,8 @@ class BedrockProxy:
             "  bedrock:\n"
             "    validate-bedrock-login: false\n"
             "    nethernet-debug: true\n"
+            "    mtu: 1200\n"
+            "    compression-level: 0\n"
             "log-player-ip-addresses: false\n"
             "enable-metrics: false\n"
             "debug-mode: true\n"
@@ -699,5 +705,33 @@ class BedrockProxy:
     # ------------------------------------------------------------ log helpers
     def _append_log(self, text: str) -> None:
         text = ANSI_RE.sub("", str(text)).strip()
-        if text:
-            self.log_tail.append(text)
+        if not text:
+            return
+        self.log_tail.append(text)
+        self._log_seq += 1
+        self.log_entries.append({"seq": self._log_seq, "t": time.time(), "text": text})
+
+    def logs(self, after: int = 0) -> dict:
+        """Structured Geyser output for the panel, with the current gateway state.
+
+        ``after`` returns only entries newer than that sequence number; ``epoch`` changes when the
+        buffer is cleared, so clients can replace their copy instead of appending stale lines.
+        """
+        return {
+            "entries": [entry for entry in self.log_entries if entry["seq"] > after],
+            "next": self._log_seq,
+            "epoch": self._log_epoch,
+            "enabled": self.enabled(),
+            "running": self.running,
+            "listening": self.listening,
+            "error": self.error,
+            "version": self.geyser_version,
+            "host": self.host,
+            "port": self.port,
+        }
+
+    def clear_logs(self) -> None:
+        """Clear the visible output only – the running gateway is not touched."""
+        self.log_tail.clear()
+        self.log_entries.clear()
+        self._log_epoch += 1

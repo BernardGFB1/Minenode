@@ -230,6 +230,16 @@ const strings = {
   'Dodano użytkownika': 'User added',
   'Zmieniono hasło': 'Password changed',
   'Zostanie pobrana ponownie, gdy będzie potrzebna.': 'It will be downloaded again when needed.',
+  'Logi Geysera (Bedrock)': 'Geyser logs (Bedrock)',
+  'bramka działa': 'gateway running',
+  'Podgląd pracy bramki Bedrock – diagnostyka połączeń i NetherNet.': 'Bedrock gateway output – connection and NetherNet diagnostics.',
+  'Wyczyść logi': 'Clear logs',
+  'Brak logów – bramka Bedrock nie jest uruchomiona.': 'No logs – the Bedrock gateway is not running.',
+  'Logi odświeżają się automatycznie co 3 sekundy.': 'Logs refresh automatically every 3 seconds.',
+  'Wyczyścić logi Geysera?': 'Clear Geyser logs?',
+  'Logi znikną tylko z tego podglądu – Geyser działa dalej.': 'Logs are removed from this view only – Geyser keeps running.',
+  'Wyczyść': 'Clear',
+  'Wyczyszczono logi Geysera': 'Geyser logs cleared',
 
   // ---------------------------------------------------------------- server page
   'Uruchom': 'Start',

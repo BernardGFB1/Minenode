@@ -233,7 +233,8 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("  forward-hostname: true", text)
         self.assertIn("advanced:", text)
         self.assertIn("    use-haproxy-protocol: true", text)
-        self.assertIn("  bedrock:\n    validate-bedrock-login: false\n    nethernet-debug: true", text)
+        self.assertIn("  bedrock:\n    validate-bedrock-login: false\n    nethernet-debug: true\n"
+                      "    mtu: 1200\n    compression-level: 0", text)
         self.assertIn("saved-user-logins: []", text)
         self.assertIn("log-player-ip-addresses: false", text)
         self.assertIn("debug-mode: true", text)
@@ -248,6 +249,51 @@ class RouteTableTests(unittest.TestCase):
         disabled_online.cfg.bedrock_enabled = True
         self.assertEqual(proxy.auth_mode(), "online")
         self.assertIn("  auth-type: online", proxy._config_text())
+
+
+class LogBufferTests(unittest.TestCase):
+    def test_log_buffer_sequences_filters_and_clear(self):
+        proxy = make_proxy([FakeInst("a", "Survival", "survival")], base_domain="example.com")
+        proxy._append_log("\x1b[32mBuilt-in signaling started\x1b[0m")
+        proxy._append_log("   ")
+        proxy._append_log("NetherNet debug: ping")
+
+        state = proxy.logs()
+        self.assertEqual([e["text"] for e in state["entries"]],
+                         ["Built-in signaling started", "NetherNet debug: ping"])
+        self.assertEqual([e["seq"] for e in state["entries"]], [1, 2])
+        self.assertTrue(all(isinstance(e["t"], float) for e in state["entries"]))
+        self.assertEqual(state["next"], 2)
+        self.assertEqual(state["epoch"], 0)
+        self.assertFalse(state["running"])
+        self.assertEqual(state["port"], 19132)
+
+        newer = proxy.logs(after=1)
+        self.assertEqual([e["text"] for e in newer["entries"]], ["NetherNet debug: ping"])
+
+        proxy.clear_logs()
+        cleared = proxy.logs()
+        self.assertEqual(cleared["entries"], [])
+        self.assertEqual(cleared["next"], 2)  # sequence keeps growing, no duplicate ids
+        self.assertEqual(cleared["epoch"], 1)
+        self.assertEqual(proxy.logs(after=2)["entries"], [])
+
+        proxy._append_log("after clear")
+        self.assertEqual(proxy.logs(after=2)["entries"][0]["seq"], 3)
+
+    def test_log_buffer_is_bounded_and_stats_keeps_error_tail(self):
+        proxy = make_proxy([FakeInst("a", "Survival", "survival")])
+        for i in range(bedrock.LOG_BUFFER + 10):
+            proxy._append_log(f"line {i}")
+        state = proxy.logs(after=0)
+        self.assertEqual(len(state["entries"]), bedrock.LOG_BUFFER)
+        self.assertEqual(state["entries"][0]["seq"], 11)
+        self.assertEqual(state["next"], bedrock.LOG_BUFFER + 10)
+
+        self.assertEqual(proxy.stats()["log"], [])  # no error, the server card stays quiet
+        proxy.error = "boom"
+        self.assertEqual(proxy.stats()["log"], [f"line {i}" for i in range(bedrock.LOG_BUFFER + 2,
+                                                                         bedrock.LOG_BUFFER + 10)])
 
 
 class FileHelpersTests(unittest.TestCase):
@@ -453,6 +499,36 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(proxy._watch_task)
         await proxy.close()
         self.assertFalse(proxy.running)
+
+    async def test_logs_report_running_state_and_clear_while_running(self):
+        inst = FakeInst("a", "Survival", "survival")
+        proxy = make_proxy([inst], base_domain="example.com", default_server_id="a")
+        proc = FakeProc()
+        with patch.object(bedrock, "ensure_java", new=AsyncMock(return_value=(21, Path("java")))), \
+                patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
+            await proxy.apply()
+            await self.wait_until(lambda: proxy.listening)
+            state = proxy.logs()
+            self.assertTrue(state["enabled"])
+            self.assertTrue(state["running"])
+            self.assertTrue(state["listening"])
+            self.assertTrue(state["entries"])
+            self.assertIn("Built-in signaling started", state["entries"][-1]["text"])
+            self.assertEqual(state["port"], 19132)
+
+            # Clearing the view must not restart or stop Geyser.
+            proxy.clear_logs()
+            cleared = proxy.logs()
+            self.assertEqual(cleared["entries"], [])
+            self.assertEqual(cleared["epoch"], 1)
+            self.assertTrue(cleared["running"])
+            self.assertTrue(cleared["listening"])
+            self.assertFalse(proc.terminated)
+
+            await proxy.close()
+            stopped = proxy.logs()
+            self.assertFalse(stopped["running"])
+            self.assertFalse(stopped["listening"])
 
 
 if __name__ == "__main__":

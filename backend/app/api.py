@@ -2190,3 +2190,24 @@ async def bedrock_set(sid: str, body: BedrockBody, _: str = Depends(auth.require
         manager.bedrock.request_apply()
     inst.broadcast({"type": "state", "state": inst.state, "summary": inst.summary()})
     return _bedrock_state(inst)
+
+
+def _bedrock_log_state(after: int = 0) -> dict:
+    bp = manager.bedrock
+    if bp is None:
+        return {"entries": [], "next": 0, "epoch": 0, "enabled": False, "running": False,
+                "listening": False, "error": None, "version": "", "host": "", "port": BEDROCK_PORT}
+    return bp.logs(max(0, after))
+
+
+@router.get("/bedrock/logs")
+async def bedrock_logs(after: int = 0, _: str = Depends(auth.require_user)):
+    return _bedrock_log_state(after)
+
+
+@router.delete("/bedrock/logs")
+async def bedrock_logs_clear(_: str = Depends(auth.require_user)):
+    bp = manager.bedrock
+    if bp is not None:
+        bp.clear_logs()
+    return _bedrock_log_state()
