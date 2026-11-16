@@ -374,7 +374,7 @@ class BedrockProxy:
             "  signaling:\n"
             "    mode: builtin\n"
             f"    advertise-addresses: {advertise}\n"
-            "    stun-discovery: false\n"
+            "    stun-discovery: true\n"
             "java:\n"
             "  address: '127.0.0.1'\n"
             f"  port: {PROXY_PORT}\n"
@@ -395,9 +395,10 @@ class BedrockProxy:
             "    use-haproxy-protocol: true\n"
             "  bedrock:\n"
             "    validate-bedrock-login: false\n"
+            "    nethernet-debug: true\n"
             "log-player-ip-addresses: false\n"
             "enable-metrics: false\n"
-            "debug-mode: false\n"
+            "debug-mode: true\n"
         )
 
     def _write_config(self, auth_mode: str) -> None:
