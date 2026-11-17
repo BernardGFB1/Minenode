@@ -36,9 +36,13 @@ if TYPE_CHECKING:
 log = logging.getLogger("minenode.bedrock")
 
 DOWNLOAD_API = "https://download.geysermc.org/v2/projects"
-GEYSER_META = f"{DOWNLOAD_API}/geyser/versions/latest/builds/latest"
+GEYSER_STABLE = ("geyser", "latest")
+GEYSER_PREVIEW_PROJECT = "geyserpreview"
+GEYSER_PREVIEW_RE = re.compile(r"^pr\.[0-9]{1,6}$")
+GEYSER_CHECK_INTERVAL = 3600.0
 BEDROCK_DIR = DATA_DIR / "bedrock"
 GEYSER_JAR = BEDROCK_DIR / "geyser-standalone.jar"
+GEYSER_INSTALLED = BEDROCK_DIR / "geyser-standalone.installed"  # "<project> <version>-b<build>"
 CONFIG = BEDROCK_DIR / "config.yml"
 EXTENSIONS_DIR = BEDROCK_DIR / "extensions"
 ROUTER_JAR = EXTENSIONS_DIR / "MineNodeRouter.jar"
@@ -117,6 +121,21 @@ def _escape_property(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
 
 
+def _read_marker() -> tuple[str, str] | None:
+    """(project, version) of the installed Geyser JAR, or None when unknown."""
+    try:
+        project, _, version = GEYSER_INSTALLED.read_text(encoding="utf-8").strip().partition(" ")
+    except OSError:
+        return None
+    return (project, version) if project and version and GEYSER_JAR.exists() else None
+
+
+def _write_marker(project: str, version: str) -> None:
+    tmp = GEYSER_INSTALLED.with_name(GEYSER_INSTALLED.name + ".tmp")
+    tmp.write_text(f"{project} {version}\n", encoding="utf-8")
+    os.replace(tmp, GEYSER_INSTALLED)
+
+
 def _write_if_changed(path: Path, text: str) -> bool:
     """Atomically replace ``path`` when its content differs. Returns True when it was written."""
     try:
@@ -167,7 +186,12 @@ class BedrockProxy:
         self._running_config: str | None = None  # config.yml text Geyser was started with
         self.geyser_java_version = bedrock_compat.GEYSER_JAVA_FALLBACK
         self._geyser_check_at = 0.0
+        self._geyser_source_checked: tuple[str, str] | None = None
         self._geyser_changed = False
+        self.geyser_project = ""
+        marker = _read_marker()
+        if marker:
+            self.geyser_project, self.geyser_version = marker
 
     # ------------------------------------------------------------ state
     def enabled(self) -> bool:
@@ -400,8 +424,6 @@ class BedrockProxy:
             "  bedrock:\n"
             "    validate-bedrock-login: false\n"
             "    nethernet-debug: true\n"
-            "    mtu: 1200\n"
-            "    compression-level: 0\n"
             "log-player-ip-addresses: false\n"
             "enable-metrics: false\n"
             "debug-mode: true\n"
@@ -467,53 +489,93 @@ class BedrockProxy:
         except (OSError, KeyError, zipfile.BadZipFile):
             log.warning("Could not read Geyser supported Java version; using %s", self.geyser_java_version)
 
+    def geyser_source(self) -> tuple[str, str]:
+        """(download project, version) of the Geyser build the panel should run."""
+        st = self.m.settings
+        preview = (getattr(st, "bedrock_geyser_preview", "") or "").strip()
+        if getattr(st, "bedrock_geyser_channel", "stable") == "preview" and GEYSER_PREVIEW_RE.match(preview):
+            return GEYSER_PREVIEW_PROJECT, preview
+        return GEYSER_STABLE
+
+    def geyser_channel_info(self) -> dict:
+        st = self.m.settings
+        return {
+            "channel": getattr(st, "bedrock_geyser_channel", "stable"),
+            "preview": getattr(st, "bedrock_geyser_preview", "") or "",
+            "installed_preview": self.geyser_project == GEYSER_PREVIEW_PROJECT,
+        }
+
+    def recheck_geyser(self) -> None:
+        """Look for the configured build on the next sync (e.g. after switching stable/preview)."""
+        self._geyser_check_at = 0.0
+        self._geyser_source_checked = None
+        self.request_apply()
+
     async def _update_geyser(self) -> None:
-        """Install the newest promoted Geyser build and atomically replace old JARs."""
+        """Install the newest build of the configured channel and atomically replace the old JAR.
+
+        A test build is never compared with a release by version number – the marker file remembers which
+        project and build the JAR came from, so switching channels always swaps the JAR.
+        """
         now = time.monotonic()
-        if GEYSER_JAR.exists() and now - self._geyser_check_at < 3600:
+        source = self.geyser_source()
+        if (GEYSER_JAR.exists() and source == self._geyser_source_checked
+                and now - self._geyser_check_at < GEYSER_CHECK_INTERVAL):
+            return
+        project, version = source
+        if GEYSER_JAR.exists() and _read_marker() is None and project == GEYSER_STABLE[0]:
+            # A JAR from before the marker file: learn its version from its metadata. If it is not a valid
+            # Geyser archive, leave it untouched and let the process start report the actual problem.
+            self._read_geyser_java_version()
+            if not self.geyser_version:
+                return
+        try:
+            meta = await net.get_json(f"{DOWNLOAD_API}/{project}/versions/{version}/builds/latest")
+            item = (meta.get("downloads") or {}).get("standalone")
+            if not item:
+                raise RuntimeError(f"Brak pliku Geyser Standalone dla {project} {version}")
+        except Exception as exc:  # noqa: BLE001
+            if not GEYSER_JAR.exists():
+                raise
+            # Keep the installed build when the download server is unreachable; try again later.
+            self._geyser_check_at = now
+            self._geyser_source_checked = source
+            log.warning("Geyser update check failed (%s); keeping the installed build", exc)
             return
         self._geyser_check_at = now
-        if not GEYSER_JAR.exists():
-            # Keep the original download path for first installation and for
-            # deployments/tests that provide a mocked Geyser downloader.
-            await self._download("geyser", "standalone", GEYSER_JAR)
-            self._geyser_changed = True
-            return
-        # A version learned from the JAR metadata is needed to compare builds.
-        # If this is not a valid Geyser archive, leave it untouched and let the
-        # normal process start report the actual problem.
-        if not self.geyser_version:
-            return
-        meta = await net.get_json(GEYSER_META)
-        item = meta.get("downloads", {}).get("standalone")
-        if not item:
-            raise RuntimeError("Geyser download 'standalone' is not available")
+        self._geyser_source_checked = source
         wanted = f"{meta['version']}-b{meta['build']}"
-        if GEYSER_JAR.exists() and self.geyser_version == wanted:
-            return
-        url = f"{DOWNLOAD_API}/geyser/versions/{meta['version']}/builds/{meta['build']}/downloads/standalone"
+        if GEYSER_JAR.exists():
+            installed = _read_marker()
+            if installed is None and project == GEYSER_STABLE[0]:
+                # Installed before the marker existed: a release JAR reports its own version.
+                if self.geyser_version == wanted:
+                    _write_marker(project, wanted)
+                    self.geyser_project = project
+                    return
+            elif installed == (project, wanted):
+                return
+        url = f"{DOWNLOAD_API}/{project}/versions/{meta['version']}/builds/{meta['build']}/downloads/standalone"
         tmp = TMP_DIR / "geyser-standalone.jar.download"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
         await net.download(url, tmp, sha256=item.get("sha256"))
+        GEYSER_JAR.parent.mkdir(parents=True, exist_ok=True)
         os.replace(tmp, GEYSER_JAR)
-        self.geyser_version = wanted
+        _write_marker(project, wanted)
+        self.geyser_project, self.geyser_version = project, wanted
         self._geyser_changed = True
-        self._append_log(f"Pobrano Geyser {wanted}")
-        log.info("Installed Geyser %s", wanted)
+        label = f"testowa {wanted}" if project == GEYSER_PREVIEW_PROJECT else wanted
+        self._append_log(f"Pobrano Geyser {label}")
+        log.info("Installed Geyser %s %s", project, wanted)
 
-    async def _download(self, project: str, name: str, destination: Path) -> None:
-        meta = await net.get_json(f"{DOWNLOAD_API}/{project}/versions/latest/builds/latest")
-        version, build = meta["version"], meta["build"]
-        item = meta.get("downloads", {}).get(name)
-        if not item:
-            raise RuntimeError(f"Geyser download '{name}' is not available")
-        url = f"{DOWNLOAD_API}/{project}/versions/{version}/builds/{build}/downloads/{name}"
-        tmp = TMP_DIR / f"{destination.name}.download"
-        await net.download(url, tmp, sha256=item.get("sha256"))
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        tmp.replace(destination)
-        self.geyser_version = f"{version}-b{build}"
-        self._append_log(f"Pobrano Geyser {self.geyser_version}")
-        log.info("Downloaded %s %s build %s", project, version, build)
+    async def send_command(self, command: str) -> None:
+        """Type a command into Geyser's console (e.g. ``geyser nethernet stats <player>``)."""
+        proc = self.proc
+        if not self.running or proc is None or proc.stdin is None:
+            raise RuntimeError("Geyser nie działa – włącz Bedrock dla serwera")
+        self._append_log(f"> {command}")
+        proc.stdin.write((command + "\n").encode("utf-8"))
+        await proc.stdin.drain()
 
     # ------------------------------------------------------------ lifecycle
     def launch(self) -> None:
@@ -728,6 +790,7 @@ class BedrockProxy:
             "version": self.geyser_version,
             "host": self.host,
             "port": self.port,
+            **self.geyser_channel_info(),
         }
 
     def clear_logs(self) -> None:

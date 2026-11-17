@@ -85,9 +85,33 @@
             </div>
             <div v-if="!geyser.entries.length" class="empty">{{ geyser.enabled ? $t('Brak logów.') : $t('Brak logów – bramka Bedrock nie jest uruchomiona.') }}</div>
           </div>
+          <form class="row" style="gap: 8px" @submit.prevent="sendGeyserCommand">
+            <div class="cmd grow"><span class="mono muted">&gt;</span><input ref="geyserCmdEl" v-model="geyserCmd" class="mono" maxlength="200" :disabled="!geyser.running" :placeholder="$t('Komenda Geysera, np. geyser list')" /></div>
+            <button type="button" class="btn sm" :disabled="!geyser.running" :title="$t('Okno przesyłu, RTT i przekroczenia czasu połączenia NetherNet gracza (tylko wersja testowa)')" @click="statsPreset"><Activity /> {{ $t('Statystyki NetherNet') }}</button>
+            <button class="btn sm" :disabled="!geyser.running || !geyserCmd.trim() || cmdBusy"><Send /> {{ $t('Wyślij') }}</button>
+          </form>
+          <div class="channel col" style="gap: 10px">
+            <div class="row wrap" style="gap: 10px">
+              <b class="small">{{ $t('Wersja Geysera') }}</b>
+              <div class="seg">
+                <button type="button" :class="{ active: channel.channel === 'stable' }" :disabled="channelBusy" @click="setChannel('stable')">{{ $t('Stabilna') }}</button>
+                <button type="button" :class="{ active: channel.channel === 'preview' }" :disabled="channelBusy" @click="setChannel('preview')">{{ $t('Testowa (PR)') }}</button>
+              </div>
+              <template v-if="channel.channel === 'preview'">
+                <span class="small text-2">PR #</span>
+                <input v-model="channel.pr" class="input mono pr" inputmode="numeric" maxlength="6" @keydown.enter.prevent="setChannel('preview')" />
+                <button type="button" class="btn sm" :disabled="channelBusy || channel.pr === currentPr" @click="setChannel('preview')">{{ $t('Zastosuj') }}</button>
+              </template>
+              <Loader2 v-if="channelBusy" class="spin" style="width: 16px" />
+            </div>
+            <div v-if="channel.channel === 'preview'" class="callout warn small"><FlaskConical /><div>
+              {{ $t('Wersja testowa pochodzi z otwartego zgłoszenia zmian w Geyserze i nie jest oficjalnym wydaniem – może mieć błędy. PR #6873 zawiera poprawki i diagnostykę połączeń NetherNet (wolne wczytywanie, opóźnienia) oraz komendę „geyser nethernet stats”. Przełączenie restartuje tylko bramkę Bedrock.') }}
+              <a :href="`https://github.com/GeyserMC/Geyser/pull/${channel.pr || 6873}`" target="_blank" rel="noopener">{{ $t('Szczegóły PR') }}</a>
+            </div></div>
+          </div>
           <div class="tiny muted">
             {{ $t('Logi odświeżają się automatycznie co 3 sekundy.') }}
-            <span v-if="geyser.version"> · Geyser {{ geyser.version }}</span>
+            <span v-if="geyser.version"> · Geyser {{ geyser.version }}<template v-if="geyser.installed_preview"> ({{ $t('testowa') }})</template></span>
             <span v-if="geyser.port"> · {{ $t('Port') }} <span class="mono">{{ geyser.port }}</span> TCP + UDP</span>
           </div>
         </div>
@@ -197,7 +221,7 @@
 </template>
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw, ScrollText, RefreshCw, Eraser, AlertTriangle } from 'lucide-vue-next'
+import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw, ScrollText, RefreshCw, Eraser, AlertTriangle, Activity, Send, FlaskConical } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
 import BackupDestinations from '../components/BackupDestinations.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
@@ -220,11 +244,18 @@ const users = ref([])
 const nu = reactive({ username: '', password: '' })
 const pw = reactive({ user: null, value: '' })
 const installed = computed(() => new Set(runtimes.value.map((r) => r.feature)))
-const geyser = reactive({ entries: [], epoch: 0, enabled: false, running: false, listening: false, error: null, version: '', port: null })
+const geyser = reactive({ entries: [], epoch: 0, enabled: false, running: false, listening: false, error: null, version: '', port: null, installed_preview: false })
 const geyserLogEl = ref(null)
 let geyserTimer = null
 let geyserAfter = 0
 const geyserBusy = ref(false)
+const geyserCmd = ref('')
+const geyserCmdEl = ref(null)
+const cmdBusy = ref(false)
+const channel = reactive({ channel: 'stable', pr: '6873' })
+const currentPr = ref('6873')
+const channelBusy = ref(false)
+let channelLoaded = false
 let geyserStick = true
 const MOTD_KEYS = ['motd_offline', 'motd_starting', 'version_offline', 'version_starting', 'kick_offline', 'kick_starting', 'kick_waking']
 const PH = [
@@ -271,8 +302,45 @@ function onGeyserScroll() {
 function applyGeyserState(r) {
   Object.assign(geyser, {
     epoch: r.epoch, enabled: r.enabled, running: r.running, listening: r.listening,
-    error: r.error, version: r.version, port: r.port,
+    error: r.error, version: r.version, port: r.port, installed_preview: !!r.installed_preview,
   })
+  if (!channelLoaded && r.channel) {
+    channelLoaded = true
+    channel.channel = r.channel
+    channel.pr = currentPr.value = String(r.preview || 'pr.6873').replace(/^pr\./, '')
+  }
+}
+async function setChannel(ch) {
+  if (ch === 'preview' && !/^[0-9]{1,6}$/.test(String(channel.pr).trim())) { toast('Podaj numer PR Geysera, np. 6873', 'error'); return }
+  if (ch === channel.channel && (ch === 'stable' || channel.pr === currentPr.value)) return
+  if (ch === 'preview' && !(await confirmDialog({
+    title: 'Przełączyć na testową wersję Geysera?',
+    message: 'Panel pobierze kompilację testową z PR i zrestartuje bramkę Bedrock – gracze Bedrock zostaną na chwilę rozłączeni. Serwery Java działają dalej. Do wersji stabilnej wrócisz jednym kliknięciem.',
+    confirmText: 'Przełącz',
+  }))) return
+  channelBusy.value = true
+  try {
+    const r = await api.put('/bedrock/geyser', { channel: ch, preview: ch === 'preview' ? String(channel.pr).trim() : undefined })
+    channel.channel = r.channel
+    currentPr.value = channel.pr = String(r.preview).replace(/^pr\./, '')
+    applyGeyserState(r)
+    toast(ch === 'preview' ? 'Pobieranie testowej wersji Geysera…' : 'Powrót do stabilnej wersji Geysera…', 'success')
+  } catch (e) { toastError(e) } finally { channelBusy.value = false }
+}
+async function sendGeyserCommand() {
+  const command = geyserCmd.value.trim()
+  if (!command) return
+  cmdBusy.value = true
+  try {
+    await api.post('/bedrock/command', { command })
+    geyserCmd.value = ''
+    geyserStick = true
+    setTimeout(() => loadGeyserLogs(), 600)
+  } catch (e) { toastError(e) } finally { cmdBusy.value = false }
+}
+function statsPreset() {
+  geyserCmd.value = 'geyser nethernet stats '
+  nextTick(() => geyserCmdEl.value?.focus())
 }
 async function loadGeyserLogs(reset = false) {
   if (geyserBusy.value) return
@@ -376,4 +444,11 @@ async function removeUser(u) {
 .geyser-log .gl.warn .tx { color: #e3b866; }
 .geyser-log .gl.error .tx { color: #ef8478; }
 .geyser-log .empty { color: var(--muted); padding: 4px 0; }
+.cmd { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: var(--radius-sm); background: var(--console-bg); border: 1px solid var(--border); min-width: 180px; }
+.cmd input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: #cfd6d0; font-size: 12.5px; }
+.channel { padding-top: 12px; border-top: 1px solid var(--border); }
+.channel .pr { width: 90px; height: 30px; }
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
+.seg button { height: 26px; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.seg button.active { background: var(--surface-3); color: var(--text); }
 </style>

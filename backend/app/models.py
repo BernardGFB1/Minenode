@@ -148,6 +148,10 @@ class PanelSettings(BaseModel):
     # Bedrock (Geyser NetherNet): addresses sent to players for the game connection, comma-separated, optional
     # ":port". Empty = public_address / a server hostname, else STUN (unreliable behind NAT that remaps ports).
     bedrock_advertise: str = ""
+    # Which Geyser build the Bedrock gateway runs: "stable" (newest promoted release) or "preview" – a test
+    # build from a Geyser pull request (download.geysermc.org project "geyserpreview", version "pr.<number>").
+    bedrock_geyser_channel: Literal["stable", "preview"] = "stable"
+    bedrock_geyser_preview: str = "pr.6873"
     # What the proxy shows for servers that are not running. Placeholders:
     # {name} {motd} {address} {mc_version} {join_hint}
     motd_offline: str = "§f{name}\n§7● Serwer jest wyłączony{join_hint}"

@@ -2196,13 +2196,56 @@ def _bedrock_log_state(after: int = 0) -> dict:
     bp = manager.bedrock
     if bp is None:
         return {"entries": [], "next": 0, "epoch": 0, "enabled": False, "running": False,
-                "listening": False, "error": None, "version": "", "host": "", "port": BEDROCK_PORT}
+                "listening": False, "error": None, "version": "", "host": "", "port": BEDROCK_PORT,
+                "channel": manager.settings.bedrock_geyser_channel, "preview": manager.settings.bedrock_geyser_preview,
+                "installed_preview": False}
     return bp.logs(max(0, after))
 
 
 @router.get("/bedrock/logs")
 async def bedrock_logs(after: int = 0, _: str = Depends(auth.require_user)):
     return _bedrock_log_state(after)
+
+
+class GeyserChannelBody(BaseModel):
+    channel: Literal["stable", "preview"]
+    preview: Optional[str] = Field(default=None, max_length=20)
+
+
+@router.put("/bedrock/geyser")
+async def bedrock_geyser_channel(body: GeyserChannelBody, _: str = Depends(auth.require_user)):
+    """Switch the Bedrock gateway between the stable Geyser release and a pull-request test build."""
+    s = manager.settings
+    if body.preview is not None:
+        preview = body.preview.strip().lower()
+        if preview.isdigit():
+            preview = f"pr.{preview}"
+        if not re.match(r"^pr\.[0-9]{1,6}$", preview):
+            raise HTTPException(400, "Podaj numer PR Geysera, np. 6873")
+        s.bedrock_geyser_preview = preview
+    s.bedrock_geyser_channel = body.channel
+    manager.save_settings(s)
+    if manager.bedrock is not None:
+        manager.bedrock.recheck_geyser()
+    return _bedrock_log_state()
+
+
+class GeyserCommandBody(BaseModel):
+    command: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/bedrock/command")
+async def bedrock_command(body: GeyserCommandBody, _: str = Depends(auth.require_user)):
+    command = body.command.strip()
+    if not command or any(ord(c) < 32 for c in command):
+        raise HTTPException(400, "Niepoprawna komenda")
+    if manager.bedrock is None:
+        raise HTTPException(400, "Bramka Bedrock nie jest dostępna")
+    try:
+        await manager.bedrock.send_command(command)
+    except (RuntimeError, OSError) as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
 
 
 @router.delete("/bedrock/logs")

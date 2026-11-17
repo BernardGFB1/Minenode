@@ -233,8 +233,10 @@ class RouteTableTests(unittest.TestCase):
         self.assertIn("  forward-hostname: true", text)
         self.assertIn("advanced:", text)
         self.assertIn("    use-haproxy-protocol: true", text)
-        self.assertIn("  bedrock:\n    validate-bedrock-login: false\n    nethernet-debug: true\n"
-                      "    mtu: 1200\n    compression-level: 0", text)
+        self.assertIn("  bedrock:\n    validate-bedrock-login: false\n    nethernet-debug: true\n", text)
+        # MTU and compression stay at Geyser's defaults (1400 / level 6).
+        self.assertNotIn("mtu:", text)
+        self.assertNotIn("compression-level:", text)
         self.assertIn("saved-user-logins: []", text)
         self.assertIn("log-player-ip-addresses: false", text)
         self.assertIn("debug-mode: true", text)
@@ -533,3 +535,94 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeyserChannelTests(unittest.TestCase):
+    """Stable release vs pull-request test build of Geyser."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.jar = self.tmp / "geyser-standalone.jar"
+        for name, value in (("GEYSER_JAR", self.jar), ("GEYSER_INSTALLED", self.tmp / "geyser.installed"),
+                            ("TMP_DIR", self.tmp / "tmp")):
+            p = patch.object(bedrock, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.builds = {("geyser", "latest"): ("2.12.1", 1303), ("geyserpreview", "pr.6873"): ("pr.6873", 207)}
+        self.downloads = []
+
+        async def get_json(url, **kw):
+            for (project, version), (v, b) in self.builds.items():
+                if f"/{project}/versions/{version}/" in url:
+                    return {"version": v, "build": b, "downloads": {"standalone": {"sha256": "x"}}}
+            raise AssertionError(url)
+
+        async def download(url, dest, **kw):
+            self.downloads.append(url)
+            Path(dest).parent.mkdir(parents=True, exist_ok=True)
+            Path(dest).write_bytes(url.encode())
+            return dest
+
+        for name, fn in (("get_json", get_json), ("download", download)):
+            p = patch.object(bedrock.net, name, fn)
+            p.start()
+            self.addCleanup(p.stop)
+        self.proxy = make_proxy([FakeInst("a", "A", "a")])
+        self.proxy.m.settings.bedrock_geyser_channel = "stable"
+        self.proxy.m.settings.bedrock_geyser_preview = "pr.6873"
+
+    def update(self):
+        asyncio.run(self.proxy._update_geyser())
+
+    def test_switching_channels_swaps_the_jar_and_is_remembered(self):
+        self.update()
+        self.assertTrue(self.downloads[-1].endswith("/geyser/versions/2.12.1/builds/1303/downloads/standalone"))
+        self.assertEqual(self.proxy.geyser_version, "2.12.1-b1303")
+
+        self.proxy.m.settings.bedrock_geyser_channel = "preview"
+        self.proxy.recheck_geyser = lambda: None
+        self.update()  # the channel changed: checked at once, not after an hour
+        self.assertTrue(self.downloads[-1].endswith("/geyserpreview/versions/pr.6873/builds/207/downloads/standalone"))
+        self.assertEqual(self.proxy.geyser_version, "pr.6873-b207")
+        self.assertTrue(self.proxy.geyser_channel_info()["installed_preview"])
+
+        # a restarted panel knows which build is installed and does not download it again
+        again = make_proxy([FakeInst("a", "A", "a")])
+        again.m.settings.bedrock_geyser_channel, again.m.settings.bedrock_geyser_preview = "preview", "pr.6873"
+        count = len(self.downloads)
+        asyncio.run(again._update_geyser())
+        self.assertEqual(len(self.downloads), count)
+        self.assertEqual(again.geyser_version, "pr.6873-b207")
+
+        self.proxy.m.settings.bedrock_geyser_channel = "stable"
+        self.update()
+        self.assertTrue(self.downloads[-1].endswith("/geyser/versions/2.12.1/builds/1303/downloads/standalone"))
+        self.assertFalse(self.proxy.geyser_channel_info()["installed_preview"])
+
+    def test_an_invalid_preview_name_falls_back_to_stable(self):
+        self.proxy.m.settings.bedrock_geyser_channel = "preview"
+        self.proxy.m.settings.bedrock_geyser_preview = "../evil"
+        self.assertEqual(self.proxy.geyser_source(), bedrock.GEYSER_STABLE)
+
+    def test_an_unreachable_download_server_keeps_the_installed_build(self):
+        self.update()
+
+        async def offline(url, **kw):
+            raise OSError("offline")
+        with patch.object(bedrock.net, "get_json", offline):
+            self.proxy.recheck_geyser = lambda: None
+            self.proxy._geyser_source_checked = None
+            asyncio.run(self.proxy._update_geyser())  # no exception
+        self.assertTrue(self.jar.exists())
+
+    def test_console_commands_go_to_geyser(self):
+        written = []
+        stdin = SimpleNamespace(write=written.append, drain=AsyncMock())
+        self.proxy.proc = SimpleNamespace(returncode=None, stdin=stdin)
+        asyncio.run(self.proxy.send_command("geyser nethernet stats Steve"))
+        self.assertEqual(written, [b"geyser nethernet stats Steve\n"])
+        self.assertEqual(self.proxy.log_entries[-1]["text"], "> geyser nethernet stats Steve")
+        self.proxy.proc = None
+        with self.assertRaises(RuntimeError):
+            asyncio.run(self.proxy.send_command("geyser list"))
