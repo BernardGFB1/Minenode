@@ -2198,7 +2198,7 @@ def _bedrock_log_state(after: int = 0) -> dict:
         return {"entries": [], "next": 0, "epoch": 0, "enabled": False, "running": False,
                 "listening": False, "error": None, "version": "", "host": "", "port": BEDROCK_PORT,
                 "channel": manager.settings.bedrock_geyser_channel, "preview": manager.settings.bedrock_geyser_preview,
-                "installed_preview": False}
+                "installed_preview": False, "integrated_pack": manager.settings.bedrock_integrated_pack}
     return bp.logs(max(0, after))
 
 
@@ -2208,8 +2208,9 @@ async def bedrock_logs(after: int = 0, _: str = Depends(auth.require_user)):
 
 
 class GeyserChannelBody(BaseModel):
-    channel: Literal["stable", "preview"]
+    channel: Optional[Literal["stable", "preview"]] = None
     preview: Optional[str] = Field(default=None, max_length=20)
+    integrated_pack: Optional[bool] = None
 
 
 @router.put("/bedrock/geyser")
@@ -2223,10 +2224,15 @@ async def bedrock_geyser_channel(body: GeyserChannelBody, _: str = Depends(auth.
         if not re.match(r"^pr\.[0-9]{1,6}$", preview):
             raise HTTPException(400, "Podaj numer PR Geysera, np. 6873")
         s.bedrock_geyser_preview = preview
-    s.bedrock_geyser_channel = body.channel
+    build_changed = body.channel is not None or body.preview is not None
+    if body.channel is not None:
+        s.bedrock_geyser_channel = body.channel
+    if body.integrated_pack is not None:
+        s.bedrock_integrated_pack = body.integrated_pack
     manager.save_settings(s)
     if manager.bedrock is not None:
-        manager.bedrock.recheck_geyser()
+        # A different build swaps the JAR; any config.yml change restarts Geyser on the next sync.
+        manager.bedrock.recheck_geyser() if build_changed else manager.bedrock.request_apply()
     return _bedrock_log_state()
 
 

@@ -152,6 +152,8 @@ class PanelSettings(BaseModel):
     # build from a Geyser pull request (download.geysermc.org project "geyserpreview", version "pr.<number>").
     bedrock_geyser_channel: Literal["stable", "preview"] = "stable"
     bedrock_geyser_preview: str = "pr.6873"
+    # Geyser's integrated resource pack (sent to every Bedrock player). Off only for diagnosing slow joins.
+    bedrock_integrated_pack: bool = True
     # What the proxy shows for servers that are not running. Placeholders:
     # {name} {motd} {address} {mc_version} {join_hint}
     motd_offline: str = "§f{name}\n§7● Serwer jest wyłączony{join_hint}"

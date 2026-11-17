@@ -626,3 +626,12 @@ class GeyserChannelTests(unittest.TestCase):
         self.proxy.proc = None
         with self.assertRaises(RuntimeError):
             asyncio.run(self.proxy.send_command("geyser list"))
+
+
+class IntegratedPackTests(unittest.TestCase):
+    def test_the_integrated_pack_can_be_turned_off_for_diagnosis(self):
+        proxy = make_proxy([FakeInst("a", "A", "a")])
+        self.assertNotIn("enable-integrated-pack", proxy._config_text("online"))  # Geyser default: on
+        proxy.m.settings.bedrock_integrated_pack = False
+        text = proxy._config_text("online")
+        self.assertIn("gameplay:\n  server-name: 'MineNode'\n  enable-integrated-pack: false\nadvanced:\n", text)

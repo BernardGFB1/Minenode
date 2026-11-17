@@ -416,6 +416,7 @@ class BedrockProxy:
             "  passthrough-player-counts: true\n"
             "gameplay:\n"
             "  server-name: 'MineNode'\n"
+            + ("" if getattr(self.m.settings, "bedrock_integrated_pack", True) else "  enable-integrated-pack: false\n") +
             "advanced:\n"
             "  java:\n"
             # Geyser prefixes the Java connection with a PROXY v2 header carrying
@@ -503,6 +504,7 @@ class BedrockProxy:
             "channel": getattr(st, "bedrock_geyser_channel", "stable"),
             "preview": getattr(st, "bedrock_geyser_preview", "") or "",
             "installed_preview": self.geyser_project == GEYSER_PREVIEW_PROJECT,
+            "integrated_pack": getattr(st, "bedrock_integrated_pack", True),
         }
 
     def recheck_geyser(self) -> None:

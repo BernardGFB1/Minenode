@@ -104,6 +104,9 @@
               </template>
               <Loader2 v-if="channelBusy" class="spin" style="width: 16px" />
             </div>
+            <Toggle :model-value="geyser.integrated_pack" :disabled="channelBusy" :label="$t('Paczka zasobów Geysera dla graczy Bedrock')"
+                    :hint="$t('Geyser wysyła ją każdemu graczowi Bedrock (m.in. animacje i elementy, których Bedrock nie ma). Telefon przetwarza ją przy każdym wejściu – wyłącz na próbę, jeśli wczytywanie trwa bardzo długo. Zmiana restartuje tylko bramkę Bedrock.')"
+                    @update:model-value="setIntegratedPack" />
             <div v-if="channel.channel === 'preview'" class="callout warn small"><FlaskConical /><div>
               {{ $t('Wersja testowa pochodzi z otwartego zgłoszenia zmian w Geyserze i nie jest oficjalnym wydaniem – może mieć błędy. PR #6873 zawiera poprawki i diagnostykę połączeń NetherNet (wolne wczytywanie, opóźnienia) oraz komendę „geyser nethernet stats”. Przełączenie restartuje tylko bramkę Bedrock.') }}
               <a :href="`https://github.com/GeyserMC/Geyser/pull/${channel.pr || 6873}`" target="_blank" rel="noopener">{{ $t('Szczegóły PR') }}</a>
@@ -223,6 +226,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw, ScrollText, RefreshCw, Eraser, AlertTriangle, Activity, Send, FlaskConical } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
+import Toggle from '../components/Toggle.vue'
 import BackupDestinations from '../components/BackupDestinations.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
 import { MC_FONT } from '../mc'
@@ -244,7 +248,7 @@ const users = ref([])
 const nu = reactive({ username: '', password: '' })
 const pw = reactive({ user: null, value: '' })
 const installed = computed(() => new Set(runtimes.value.map((r) => r.feature)))
-const geyser = reactive({ entries: [], epoch: 0, enabled: false, running: false, listening: false, error: null, version: '', port: null, installed_preview: false })
+const geyser = reactive({ entries: [], epoch: 0, enabled: false, running: false, listening: false, error: null, version: '', port: null, installed_preview: false, integrated_pack: true })
 const geyserLogEl = ref(null)
 let geyserTimer = null
 let geyserAfter = 0
@@ -303,6 +307,7 @@ function applyGeyserState(r) {
   Object.assign(geyser, {
     epoch: r.epoch, enabled: r.enabled, running: r.running, listening: r.listening,
     error: r.error, version: r.version, port: r.port, installed_preview: !!r.installed_preview,
+    integrated_pack: r.integrated_pack !== false,
   })
   if (!channelLoaded && r.channel) {
     channelLoaded = true
@@ -325,6 +330,13 @@ async function setChannel(ch) {
     currentPr.value = channel.pr = String(r.preview).replace(/^pr\./, '')
     applyGeyserState(r)
     toast(ch === 'preview' ? 'Pobieranie testowej wersji Geysera…' : 'Powrót do stabilnej wersji Geysera…', 'success')
+  } catch (e) { toastError(e) } finally { channelBusy.value = false }
+}
+async function setIntegratedPack(on) {
+  channelBusy.value = true
+  try {
+    applyGeyserState(await api.put('/bedrock/geyser', { integrated_pack: on }))
+    toast(on ? 'Paczka Geysera włączona – bramka Bedrock się restartuje' : 'Paczka Geysera wyłączona – bramka Bedrock się restartuje', 'success')
   } catch (e) { toastError(e) } finally { channelBusy.value = false }
 }
 async function sendGeyserCommand() {
