@@ -96,6 +96,34 @@
           </section>
         </div>
 
+        <section class="card chat-card">
+          <div class="card-head">
+            <h3><MessageSquare /> {{ $t('Czat graczy') }}</h3>
+            <span class="spacer" />
+            <span class="tiny muted chat-limit">{{ $t('ostatnie 50 wiadomości') }}</span>
+            <span class="badge" :class="{ green: chat.length }">{{ chat.length }}</span>
+          </div>
+          <div v-if="!chat.length" class="chat-empty">
+            <MessageSquare />
+            <div>
+              <div class="chat-empty-title">{{ isUp ? $t('Cisza na czacie') : $t('Serwer jest wyłączony.') }}</div>
+              <div class="tiny muted">{{ isUp ? $t('Wiadomości graczy pojawią się tutaj.') : $t('Czat pojawi się, gdy serwer zacznie działać.') }}</div>
+            </div>
+          </div>
+          <div v-else ref="chatEl" class="chat-list" @scroll="onChatScroll">
+            <div v-for="m in chat" :key="m.seq" class="chat-msg">
+              <img class="chat-head" :src="headUrl(m.name)" alt="" referrerpolicy="no-referrer" loading="lazy" />
+              <div class="chat-body">
+                <div class="chat-meta">
+                  <span class="chat-name" :style="{ color: nameColor(m.name) }">{{ m.name }}</span>
+                  <span class="chat-time" :title="chatFullTime(m.t)">{{ chatTime(m.t) }}</span>
+                </div>
+                <div class="chat-text">{{ m.text }}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section v-if="data.offline.length" class="card">
           <div class="card-head">
             <h3>{{ $t('Ostatnio na serwerze') }}</h3>
@@ -140,9 +168,9 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { Copy, Gamepad2, Globe, History, Info, Loader2, Maximize2, Moon, ServerOff, Settings2, Sun, Timer, Users } from 'lucide-vue-next'
+import { Copy, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, ServerOff, Settings2, Sun, Timer, Users } from 'lucide-vue-next'
 import BrandMark from '../components/BrandMark.vue'
 import LangSwitch from '../components/LangSwitch.vue'
 import Meter from '../components/Meter.vue'
@@ -181,8 +209,40 @@ const lastSeenText = computed(() => {
   const last = data.value?.offline[0]?.last_seen
   return last ? t('ostatnio ktoś grał {t}', { t: timeAgo(last) }) : t('nikt jeszcze nie grał')
 })
+const chat = computed(() => (data.value?.chat || []).slice(-50))
+const chatLast = computed(() => chat.value.length ? chat.value[chat.value.length - 1].seq : 0)
+
+const chatEl = ref(null)
+let chatStick = true
 
 const headUrl = (name) => `https://mc-heads.net/avatar/${encodeURIComponent(name)}/40`
+const chatFullTime = (t) => new Date((t || 0) * 1000).toLocaleString()
+
+function chatTime(t) {
+  const d = new Date((t || 0) * 1000)
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString()
+    ? time
+    : `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${time}`
+}
+
+function nameColor(name) {
+  let hue = 0
+  for (let i = 0; i < name.length; i++) hue = (hue * 31 + name.charCodeAt(i)) % 360
+  return ui.theme === 'dark' ? `hsl(${hue} 52% 72%)` : `hsl(${hue} 55% 38%)`
+}
+
+function onChatScroll() {
+  const el = chatEl.value
+  if (el) chatStick = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+}
+
+watch(chatLast, async (value, previous) => {
+  if (!value) { chatStick = true; return }
+  await nextTick()
+  const el = chatEl.value
+  if (el && (chatStick || !previous)) el.scrollTop = el.scrollHeight
+})
 
 async function load() {
   try {
@@ -246,6 +306,23 @@ onUnmounted(() => {
 .pms.red { color: var(--danger); }
 .empty.small { padding: 36px 20px; font-size: 13px; }
 
+.chat-card .card-head h3 { display: flex; align-items: center; gap: 8px; }
+.chat-card .card-head h3 svg { width: 16px; height: 16px; color: var(--muted); }
+.chat-limit { white-space: nowrap; }
+.chat-list { max-height: 380px; overflow-y: auto; padding: 8px 10px 12px; overscroll-behavior: contain; }
+.chat-msg { display: flex; gap: 11px; padding: 7px 10px; border-radius: var(--radius-sm); animation: chat-in 0.22s ease-out; }
+.chat-msg:hover { background: var(--surface-2); }
+.chat-head { width: 34px; height: 34px; border-radius: 8px; flex: none; image-rendering: pixelated; background: var(--surface-2); }
+.chat-body { min-width: 0; flex: 1; }
+.chat-meta { display: flex; align-items: baseline; gap: 8px; }
+.chat-name { font-weight: 650; font-size: 13px; letter-spacing: -0.01em; }
+.chat-time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chat-text { font-size: 13.5px; line-height: 1.45; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 38px 20px 42px; text-align: center; color: var(--muted); }
+.chat-empty > svg { width: 28px; height: 28px; opacity: 0.55; }
+.chat-empty-title { color: var(--text-2); font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
+@keyframes chat-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
 .steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: var(--text-2); }
 .addr { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; border: 1px solid var(--border); background: var(--surface-2);
   color: var(--text); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px; vertical-align: middle; }
@@ -274,6 +351,7 @@ onUnmounted(() => {
   .page { padding: 18px 16px 40px; }
   .head .btn.primary { width: 100%; justify-content: center; }
   .search { width: 140px; }
+  .chat-limit { display: none; }
   .foot { flex-direction: column; gap: 4px; }
 }
 </style>

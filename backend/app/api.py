@@ -1893,6 +1893,7 @@ def _public_stats(inst: ServerInstance) -> dict:
         },
         "online": online,
         "offline": offline[:200],
+        "chat": list(getattr(inst, "chat", [])),
         "players": {"online": len(online), "offline": len(offline), "known": len(online) + len(offline),
                     "max": _public_max_players(inst)},
         "map": {

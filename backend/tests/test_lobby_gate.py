@@ -161,6 +161,30 @@ def test_custom_join_messages_still_count_through_the_login_line(tmp_path, monke
     assert inst.online == {}
 
 
+def test_player_chat_is_collected_and_system_lines_are_ignored(tmp_path, monkeypatch):
+    inst = _instance(tmp_path, monkeypatch)
+    inst._parse_line("[12:00:00 INFO]: <§6Steve§r> Cześć §awszystkim§r!")
+    inst._parse_line("[12:00:01 INFO]: [Not Secure] <Alex> hello")
+    inst._parse_line("[12:00:02] [Async Chat Thread - #0/INFO]: [Not Secure] <.Bedrock Kid> hi there")
+    inst._parse_line("[12:00:03 INFO]: Steve joined the game")
+    inst._parse_line("[12:00:04 INFO]: <Steve>")  # empty message
+    assert [m["name"] for m in inst.chat] == ["Steve", "Alex", ".Bedrock Kid"]
+    assert inst.chat[0]["text"] == "Cześć wszystkim!"
+    assert inst.chat[2]["text"] == "hi there"
+    assert [m["seq"] for m in inst.chat] == [1, 2, 3]
+    assert isinstance(inst.chat[0]["t"], float)
+
+
+def test_chat_buffer_keeps_the_latest_fifty_messages(tmp_path, monkeypatch):
+    inst = _instance(tmp_path, monkeypatch)
+    for i in range(60):
+        inst._parse_line(f"[12:00:00 INFO]: <Steve> message {i}")
+    assert len(inst.chat) == 50
+    assert inst.chat[0]["text"] == "message 10"
+    assert inst.chat[-1]["text"] == "message 59"
+    assert [m["seq"] for m in inst.chat] == list(range(11, 61))
+
+
 def test_proxy_connections_define_who_is_online(tmp_path, monkeypatch):
     inst = _instance(tmp_path, monkeypatch)
     inst.proxy_player_joined(".BedrockKid")          # Geyser name: never matches the log patterns

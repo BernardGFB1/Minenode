@@ -50,6 +50,11 @@ JOIN_RE = re.compile(rf"\]: (?:System chat: )?{NAME} joined the game")
 LEAVE_RE = re.compile(rf"\]: (?:System chat: )?{NAME} left the game")
 # Printed by the server itself whatever plugins do to the join/leave chat messages (EssentialsX etc.)
 LOGIN_RE = re.compile(rf"\]: {NAME}\[/[^\]]*\] logged in with entity id")
+# Player chat from the server log: "]: <Steve> message", optionally prefixed with "[Not Secure]".
+# Bedrock players seen through Geyser can have dots or spaces in their names.
+CHAT_RE = re.compile(r"\]: (?:\[Not Secure\] )?<([^<>]{1,40})>\s?(.*)$")
+CHAT_BUFFER = 50
+MC_CODE_RE = re.compile(r"§[0-9A-FK-ORa-fk-or]")
 LOST_RE = re.compile(rf"\]: {NAME} lost connection:")
 UUID_RE = re.compile(rf"UUID of player {NAME} is ([0-9a-fA-F-]{{32,36}})")
 DONE_RE = re.compile(r"Done \([\d.,]+s\)!")
@@ -102,6 +107,8 @@ class ServerInstance:
         self.proc: asyncio.subprocess.Process | None = None
         self.console: deque[dict] = deque(maxlen=4000)
         self._seq = 0
+        self.chat: deque[dict] = deque(maxlen=CHAT_BUFFER)
+        self._chat_seq = 0
         self.subs: set[asyncio.Queue] = set()
         self.online: dict[str, float] = {}
         self.stats: deque[dict] = deque(maxlen=450)  # 15 minutes at 2s
@@ -569,6 +576,8 @@ class ServerInstance:
         for pattern, fut in list(self._waiters):
             if not fut.done() and pattern.search(plain):
                 fut.set_result(True)
+        if m := CHAT_RE.search(plain):
+            self._add_chat(m.group(1), m.group(2))
         if self.state == "starting" and DONE_RE.search(plain):
             self.set_state("online")
             self._autofix_count = 0
@@ -603,6 +612,14 @@ class ServerInstance:
             self.map_render.on_line(plain)
         elif "Task " in plain or "No tasks" in plain:
             self.chunky_runner.on_line(plain)
+
+    def _add_chat(self, name: str, text: str) -> None:
+        name = MC_CODE_RE.sub("", name).strip()
+        text = MC_CODE_RE.sub("", text).strip()
+        if not name or not text:
+            return
+        self._chat_seq += 1
+        self.chat.append({"seq": self._chat_seq, "t": time.time(), "name": name[:40], "text": text[:500]})
 
     def _is_online(self, name: str) -> bool:
         key = name.lower()

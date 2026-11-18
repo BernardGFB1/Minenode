@@ -281,6 +281,7 @@ def test_public_stats_separates_online_and_offline(tmp_path, monkeypatch):
         online={"Steve": 200.0}, players_store=Store(),
         props=lambda: {"max-players": "30", "motd": "Hello"}, address=lambda: "play.example.com",
         online_mode=True, icon_version=lambda: 7,
+        chat=[{"seq": 1, "t": 123.0, "name": "Steve", "text": "Cześć!"}],
     )
     from app import api
     monkeypatch.setattr(api, "manager", SimpleNamespace(proxy=SimpleNamespace(player_pings=lambda sid: {"steve": 42})), raising=False)
@@ -288,6 +289,7 @@ def test_public_stats_separates_online_and_offline(tmp_path, monkeypatch):
     assert [p["name"] for p in stats["online"]] == ["Steve"]
     assert stats["online"][0]["ping"] == 42
     assert stats["online"][0]["joined_at"] == 200.0
+    assert stats["chat"] == [{"seq": 1, "t": 123.0, "name": "Steve", "text": "Cześć!"}]
     assert [p["name"] for p in stats["offline"]] == ["Alex", "Old"]
     assert stats["players"] == {"online": 1, "offline": 2, "known": 3, "max": 30}
     assert stats["server"]["address"] == "play.example.com"
