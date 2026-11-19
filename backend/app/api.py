@@ -2156,6 +2156,7 @@ async def webmap_set(sid: str, body: WebMapBody, _: str = Depends(auth.require_u
 
 class WebMapRenderBody(BaseModel):
     action: Literal["start", "cancel"] = "start"
+    mode: Literal["full", "update"] = "full"
 
 
 @router.post("/servers/{sid}/webmap/render")
@@ -2165,7 +2166,7 @@ async def webmap_render(sid: str, body: WebMapRenderBody, _: str = Depends(auth.
     if body.action == "cancel":
         inst.map_render.cancel()
     else:
-        inst.map_render.start()
+        inst.map_render.start(body.mode)
     await asyncio.sleep(0.3)  # let the map answer the first command
     return await webmap.state(inst)
 

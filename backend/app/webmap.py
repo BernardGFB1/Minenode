@@ -35,13 +35,13 @@ log = logging.getLogger("minenode.webmap")
 
 PROVIDER_IDS = ("squaremap", "dynmap", "bluemap")
 INFO = {
-    "squaremap": {"title": "squaremap", "three_d": False, "proxy": False,
+    "squaremap": {"title": "squaremap", "three_d": False, "proxy": False, "incremental": False,
                   "engines": ("paper", "purpur", "fabric", "quilt", "forge", "neoforge"),
                   "about": "Lekka mapa 2D z góry. Najmniejsze obciążenie serwera."},
-    "dynmap": {"title": "Dynmap", "three_d": True, "proxy": True,
+    "dynmap": {"title": "Dynmap", "three_d": True, "proxy": True, "incremental": False,
                "engines": ("paper", "purpur", "fabric", "quilt", "forge"),
                "about": "Klasyczna mapa w stylu Google Maps: widok płaski, opcjonalnie izometryczny."},
-    "bluemap": {"title": "BlueMap", "three_d": True, "proxy": True,
+    "bluemap": {"title": "BlueMap", "three_d": True, "proxy": True, "incremental": True,
                 "engines": ("paper", "purpur", "fabric", "quilt", "forge", "neoforge"),
                 "about": "Mapa 3D, po której można latać. Opcjonalnie tylko lekki widok płaski."},
 }
@@ -418,7 +418,7 @@ async def _status(inst: "ServerInstance", pid: str, refresh: bool) -> dict:
 # ====================================================================== manual full render
 
 START_TIMEOUT = 45  # a world that does not confirm the render in time is skipped
-BLUEMAP_FIRST_POLL = 3.0  # let BlueMap queue the force-update before asking for its status
+BLUEMAP_FIRST_POLL = 3.0  # let BlueMap queue the update command before asking for its status
 BLUEMAP_POLL = 8.0
 
 _LOG = {
@@ -471,15 +471,16 @@ def _as_int(raw: str) -> int:
     return int(re.sub(r"\D", "", raw) or 0)
 
 
-def _bluemap_map_count(inst: "ServerInstance") -> int:
+def _bluemap_maps(inst: "ServerInstance") -> list[str]:
+    """Ids of the maps BlueMap loaded from ``maps/*.conf`` (the command needs the id)."""
     try:
-        return max(1, len(list((bluemap_dir(inst) / "maps").glob("*.conf"))))
+        return sorted(p.stem for p in (bluemap_dir(inst) / "maps").glob("*.conf"))
     except OSError:
-        return 1
+        return []
 
 
 class MapRender:
-    """A full render started from the panel: worlds one after another, never automatically."""
+    """A render started from the panel: worlds one after another, never automatically."""
 
     def __init__(self, inst: "ServerInstance"):
         self.inst = inst
@@ -489,6 +490,7 @@ class MapRender:
         self.requested_at: Optional[float] = None
         self.finished_at: Optional[float] = None
         self.provider: Optional[str] = None
+        self.mode = "full"  # "full" re-renders everything, "update" only changed tiles (BlueMap)
         self.total_worlds = 0
         self.finished_worlds = 0
         self.percent: Optional[float] = None
@@ -502,6 +504,8 @@ class MapRender:
         self.paused = False
         self.bluemap_active = False
         self._bluemap_next = 0.0
+        self._bluemap_idle = 0
+        self._bluemap_seen = False
 
     @property
     def running(self) -> bool:
@@ -514,7 +518,7 @@ class MapRender:
         return {
             "running": self.running, "current": self.current or (self.awaiting or (None,))[0],
             "queue": list(self.queue), "requested_at": self.requested_at, "finished_at": self.finished_at,
-            "provider": self.provider, "percent": rounded(self.percent),
+            "provider": self.provider, "mode": self.mode, "percent": rounded(self.percent),
             "world_percent": rounded(self.world_percent), "processed": self.processed,
             "total": self.processed_total, "rate": rounded(self.rate), "eta": self.eta,
             "elapsed": self.elapsed, "unit": self.unit, "worlds_done": self.finished_worlds,
@@ -543,26 +547,42 @@ class MapRender:
         self.rate = self.eta = self.elapsed = None
         self.paused = False
 
-    def start(self) -> dict:
+    def start(self, mode: str = "full") -> dict:
         inst = self.inst
         pid = provider(inst)
+        if mode not in ("full", "update"):
+            raise ModpackError("Nieznany tryb renderowania mapy")
         if not inst.cfg.webmap.enabled:
             raise ModpackError("Najpierw włącz mapę")
         if inst.state != "online":
             raise ModpackError("Serwer musi być uruchomiony, żeby wygenerować mapę")
         if self.running:
             raise ModpackError("Mapa już się renderuje")
-        self.provider, self.requested_at, self.finished_at = pid, time.time(), None
+        if mode == "update" and not INFO[pid]["incremental"]:
+            raise ModpackError(f"{INFO[pid]['title']} sam dorysowuje zmienione fragmenty – "
+                               "dostępny jest tylko pełny render")
+        maps = _bluemap_maps(inst) if pid == "bluemap" else []
+        if pid == "bluemap" and not maps:
+            raise ModpackError("BlueMap nie ma jeszcze gotowych map – uruchom serwer i spróbuj ponownie")
+        self.provider, self.mode = pid, mode
+        self.requested_at, self.finished_at = time.time(), None
         self.finished_worlds = 0
         self._reset_progress()
         if pid == "bluemap":
             # BlueMap renders every map in the background and reports progress in /bluemap.
-            self.total_worlds = _bluemap_map_count(inst)
+            # From the console the command needs an explicit map id (the world-only variant works
+            # just for players). "update" keeps tiles that did not change, "force-update" redoes all.
+            self.total_worlds = len(maps)
             self.unit = None
             self.bluemap_active = True
+            self._bluemap_idle = 0
+            self._bluemap_seen = False
             self._bluemap_next = time.time() + BLUEMAP_FIRST_POLL
-            self._send("bluemap force-update")
-            inst.panel_log("BlueMap: ponowne renderowanie wszystkich map rozpoczęte.")
+            command = "update" if mode == "update" else "force-update"
+            for map_id in maps:
+                self._send(f"bluemap {command} {map_id}")
+            inst.panel_log("BlueMap: aktualizowanie zmienionych fragmentów map rozpoczęte." if mode == "update"
+                           else "BlueMap: ponowne renderowanie wszystkich map rozpoczęte.")
             return self.status()
         self.queue = self._worlds(pid)
         self.total_worlds = len(self.queue)
@@ -673,6 +693,8 @@ class MapRender:
                 self.world_percent = _as_float(m.group("percent"))
             except ValueError:
                 return
+            self._bluemap_idle = 0
+            self._bluemap_seen = True
             self._sync_percent()
             # BlueMap prints "progress: … • remaining time: …" on one line.
             if e := _BLUEMAP_ETA.search(plain):
@@ -680,6 +702,8 @@ class MapRender:
             return
         if m := _BLUEMAP_MAP.search(plain):
             world = m.group("map").strip().strip("'\"")
+            self._bluemap_idle = 0
+            self._bluemap_seen = True
             if self.current and world != self.current:
                 self.finished_worlds += 1
                 if self.total_worlds:
@@ -692,7 +716,14 @@ class MapRender:
             self.eta = m.group("eta").strip()
             return
         if _BLUEMAP_IDLE.search(plain):
-            self._finish_bluemap()
+            # Right after the command one idle answer can still be a gap before the task starts;
+            # a render that was actually running is finished on the first idle answer.
+            if self._bluemap_seen:
+                self._finish_bluemap()
+            else:
+                self._bluemap_idle += 1
+                if self._bluemap_idle >= 2:
+                    self._finish_bluemap()
             return
         if _BLUEMAP_PAUSED.search(plain):
             self.paused = True
@@ -707,9 +738,12 @@ class MapRender:
         self.percent = 100.0
         self.eta = None
         self.paused = False
+        self._bluemap_idle = 0
+        self._bluemap_seen = False
         if self.requested_at and not self.finished_at:
             self.finished_at = now or time.time()
-            self.inst.panel_log("Mapa została wyrenderowana.")
+            self.inst.panel_log("Mapa została zaktualizowana." if self.mode == "update"
+                                else "Mapa została wyrenderowana.")
 
     def tick(self, now: float) -> None:
         if self.bluemap_active:
@@ -730,4 +764,6 @@ class MapRender:
         self.queue.clear()
         self.current = self.awaiting = None
         self.bluemap_active = False
+        self._bluemap_idle = 0
+        self._bluemap_seen = False
         self.eta = None

@@ -221,7 +221,8 @@ def test_bluemap_render_progress_and_cancel(tmp_path):
         (maps / f"{name}.conf").write_text(f"name: \"{name}\"\n")
     r = webmap.MapRender(inst)
     r.start()
-    assert sent == ["bluemap force-update"] and r.running
+    assert sent == ["bluemap force-update world", "bluemap force-update world_nether",
+                    "bluemap force-update world_the_end"] and r.running
     assert r.status()["worlds_total"] == 3 and r.status()["percent"] == 0
     r.tick(r.requested_at + webmap.BLUEMAP_FIRST_POLL + 1)
     assert sent[-1] == "bluemap"
@@ -241,12 +242,54 @@ def test_bluemap_render_progress_and_cancel(tmp_path):
 
     r.start()
     r.tick(r.requested_at + webmap.BLUEMAP_FIRST_POLL + 1)
+    r.on_line("[Server thread/INFO]: [BlueMap] 1 render-thread is idle")
+    assert r.running  # idle right after the command is ignored
+    r.on_line("[Server thread/INFO]: [BlueMap] 1 render-thread is idle")
+    assert not r.running
+
+    r.start()
+    r.tick(r.requested_at + webmap.BLUEMAP_FIRST_POLL + 1)
     r.cancel()
     assert sent[-1] == "bluemap tasks cancel all" and not r.running
 
     inst.state = "offline"
     with pytest.raises(ModpackError):
         webmap.MapRender(inst).start()
+
+
+def test_bluemap_render_needs_a_configured_map(tmp_path):
+    inst, sent, _ = _inst(tmp_path, "paper", provider="bluemap")
+    with pytest.raises(ModpackError):
+        webmap.MapRender(inst).start()
+    assert sent == []  # no invalid "force-update" without a map id
+
+
+def test_bluemap_update_only_changed_tiles(tmp_path):
+    inst, sent, logs = _inst(tmp_path, "paper", provider="bluemap")
+    maps = tmp_path / "plugins" / "BlueMap" / "maps"
+    maps.mkdir(parents=True)
+    for name in ("world", "world_the_nether"):
+        (maps / f"{name}.conf").write_text(f"name: \"{name}\"\n")
+    r = webmap.MapRender(inst)
+    assert r.start("update")["mode"] == "update"
+    assert sent == ["bluemap update world", "bluemap update world_the_nether"]
+    assert any("zmienionych" in line for line in logs)
+    r.on_line("[Server thread/INFO]: [BlueMap] 1 render-thread is idle")
+    r.on_line("[Server thread/INFO]: [BlueMap] 1 render-thread is idle")
+    assert not r.running and r.status()["finished_at"]
+    assert logs[-1] == "Mapa została zaktualizowana."
+    assert r.status()["mode"] == "update"  # the UI can tell what the last run did
+
+    r.start()  # the default stays a full re-render
+    assert sent[-2:] == ["bluemap force-update world", "bluemap force-update world_the_nether"]
+
+
+def test_incremental_render_is_bluemap_only(tmp_path):
+    for pid, engine in (("squaremap", "paper"), ("dynmap", "fabric")):
+        inst, sent, _ = _inst(tmp_path / pid, engine, provider=pid)
+        with pytest.raises(ModpackError):
+            webmap.MapRender(inst).start("update")
+        assert sent == []  # those maps update changed chunks by themselves
 
 
 def test_squaremap_player_markers_follow_the_option(tmp_path):

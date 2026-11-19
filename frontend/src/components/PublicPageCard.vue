@@ -71,9 +71,18 @@
                 <span class="tiny muted">{{ renderText }}</span>
               </div>
               <div v-if="renderRunning && renderPercent !== null" class="pct num">{{ renderPercentLabel }}</div>
-              <button v-if="renderRunning" class="btn sm" :disabled="renderBusy" @click="render('cancel')"><Square /> {{ $t('Przerwij') }}</button>
-              <button v-else class="btn sm" :disabled="renderBusy || !v.online" :title="v.online ? '' : $t('Uruchom serwer, żeby wygenerować mapę')" @click="render('start')">
-                <Loader2 v-if="renderBusy" class="spin" /><Play v-else /> {{ $t('Wygeneruj mapę') }}</button>
+              <button v-if="renderRunning" class="btn sm" :disabled="!!renderBusy" @click="render('cancel')"><Square /> {{ $t('Przerwij') }}</button>
+              <template v-else>
+                <button v-if="canUpdate" class="btn sm" :disabled="!!renderBusy || !v.online"
+                        :title="v.online ? $t('Sprawdza całą mapę i przerysowuje tylko zmienione fragmenty.') : $t('Uruchom serwer, żeby wygenerować mapę')"
+                        @click="render('start', 'update')">
+                  <Loader2 v-if="renderBusy === 'update'" class="spin" /><RefreshCw v-else /> {{ $t('Aktualizuj zmienione') }}</button>
+                <button class="btn sm" :disabled="!!renderBusy || !v.online"
+                        :title="v.online ? (canUpdate ? $t('Przerysowuje wszystkie kafelki od nowa – przydaje się po zmianie widoku.') : '') : $t('Uruchom serwer, żeby wygenerować mapę')"
+                        @click="render('start', 'full')">
+                  <Loader2 v-if="renderBusy === 'full'" class="spin" /><Play v-else />
+                  {{ canUpdate ? $t('Wygeneruj od nowa') : $t('Wygeneruj mapę') }}</button>
+              </template>
             </div>
             <div v-if="renderRunning" class="progress" :class="{ indeterminate: renderPercent === null }">
               <div :style="renderPercent !== null ? { width: Math.min(100, renderPercent) + '%' } : undefined" />
@@ -121,7 +130,7 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { AlertTriangle, BarChart3, Copy, Download, ExternalLink, Info, Loader2, Map as MapIcon, Play, RotateCcw, Square } from 'lucide-vue-next'
+import { AlertTriangle, BarChart3, Copy, Download, ExternalLink, Info, Loader2, Map as MapIcon, Play, RefreshCw, RotateCcw, Square } from 'lucide-vue-next'
 import Toggle from './Toggle.vue'
 import { api } from '../api'
 import { t } from '../i18n'
@@ -132,13 +141,14 @@ const props = defineProps({ serverId: String, subdomain: String })
 const v = ref(null)
 const busy = ref(false)
 const restart = ref(false)
-const renderBusy = ref(false)
+const renderBusy = ref('')  // '', 'update', 'full' or 'cancel'
 let timer = null
 
 const pageUrl = computed(() => v.value?.public_url || `/${props.subdomain}/stats`)
 const fullUrl = computed(() => `${window.location.origin}${pageUrl.value}`)
 const cur = computed(() => v.value?.current || {})
 const renderState = computed(() => v.value?.render || null)
+const canUpdate = computed(() => !!cur.value.incremental)
 const renderRunning = computed(() => !!renderState.value?.running)
 const renderPercent = computed(() => typeof renderState.value?.percent === 'number' ? renderState.value.percent : null)
 const renderPercentLabel = computed(() => renderPercent.value === null ? ''
@@ -175,12 +185,16 @@ const renderText = computed(() => {
   if (r?.running) {
     const world = worldLabel(r.current)
     const left = r.queue?.length || 0
-    if (world && left) return t('Teraz renderuje się {w}. Kolejne światy: {n}.', { w: world, n: left })
-    if (world) return t('Teraz renderuje się {w}.', { w: world })
-    return t('Przygotowywanie renderowania…')
+    const what = r.mode === 'update' ? t('Aktualizowanie zmienionych fragmentów mapy.') : ''
+    if (world && left) return [what, t('Teraz renderuje się {w}. Kolejne światy: {n}.', { w: world, n: left })].filter(Boolean).join(' ')
+    if (world) return [what, t('Teraz renderuje się {w}.', { w: world })].filter(Boolean).join(' ')
+    return [what, t('Przygotowywanie renderowania…')].filter(Boolean).join(' ')
   }
-  if (v.value?.provider === 'bluemap') return t('BlueMap sam renderuje zmienione i nowe chunki. Przycisk renderuje wszystkie mapy od nowa – przydaje się po zmianie widoku.')
-  const done = r?.finished_at ? ' ' + t('Ostatnio: {d}.', { d: new Date(r.finished_at * 1000).toLocaleString() }) : ''
+  const date = r?.finished_at ? new Date(r.finished_at * 1000).toLocaleString() : ''
+  const done = date ? ' ' + t(r?.mode === 'update' ? 'Ostatnio zaktualizowano: {d}.' : 'Ostatnio: {d}.', { d: date }) : ''
+  if (v.value?.provider === 'bluemap') {
+    return t('BlueMap sam dorysowuje nowe i zmienione chunki. „Aktualizuj zmienione” sprawdza całą mapę i przerysowuje tylko zmienione fragmenty, a „Wygeneruj od nowa” liczy wszystkie kafelki na nowo – przydaje się po zmianie widoku.') + done
+  }
   return t('Nowe i zmienione chunki pojawiają się na mapie same. Teren sprzed włączenia mapy dorysuje pełny render – uruchamiasz go tylko tym przyciskiem.') + done
 })
 
@@ -231,12 +245,14 @@ async function pick(p) {
   save({ provider: p.id })
 }
 
-async function render(action) {
-  renderBusy.value = true
+async function render(action, mode = 'full') {
+  renderBusy.value = action === 'start' ? mode : action
   try {
-    v.value = await api.post(`/servers/${props.serverId}/webmap/render`, { action })
-    if (action === 'start') toast(t('Renderowanie mapy rozpoczęte'), 'success')
-  } catch (e) { toastError(e) } finally { renderBusy.value = false }
+    v.value = await api.post(`/servers/${props.serverId}/webmap/render`, { action, mode })
+    if (action === 'start') {
+      toast(mode === 'update' ? t('Aktualizacja zmienionych fragmentów rozpoczęta') : t('Renderowanie mapy rozpoczęte'), 'success')
+    }
+  } catch (e) { toastError(e) } finally { renderBusy.value = '' }
 }
 
 async function doRestart() {
