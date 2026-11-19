@@ -38,8 +38,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=Europe/Warsaw
 
 # tini: proper PID 1 / signal forwarding; fontconfig+freetype: needed by some mods (maps, image rendering)
+# gcc, libc6-dev, patch: the panel compiles PicoLimbo (authentication lobby) from its author's source code
+# on this server – Rust itself is installed by the panel with rustup into /data on first use.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini ca-certificates tzdata fontconfig libfreetype6 procps \
+      gcc libc6-dev patch \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd -g 1000 minenode && useradd -u 1000 -g 1000 -m -d /home/minenode minenode
 

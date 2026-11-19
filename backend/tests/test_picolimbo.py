@@ -1,8 +1,8 @@
 import asyncio
-import hashlib
 import io
 import json
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,124 +14,120 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(picolimbo, "BIN_DIR", tmp_path / "bin")
     monkeypatch.setattr(picolimbo, "BINARY", tmp_path / "bin" / "pico_limbo")
     monkeypatch.setattr(picolimbo, "VERSION_FILE", tmp_path / "bin" / "version.json")
+    monkeypatch.setattr(picolimbo, "BUILD_DIR", tmp_path / "build")
+    monkeypatch.setattr(picolimbo, "RUST_DIR", tmp_path / "rust")
     monkeypatch.setattr(picolimbo, "TMP_DIR", tmp_path / "tmp")
     monkeypatch.setattr(picolimbo, "LOCAL_OVERRIDE", None)
-    monkeypatch.setattr(picolimbo, "arch", lambda: "x86_64")
-
-
-def archive(content=b"#!/bin/sh\necho limbo\n", extra=()):
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for name, data in [*extra, ("pico_limbo", content)]:
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-    return buf.getvalue()
-
-
-def release(tag, published, data, *, digest=True, draft=False, arch="x86_64"):
-    name = picolimbo.asset_name(arch)
-    asset = {"name": name, "size": len(data), "browser_download_url": f"https://dl/{tag}/{name}"}
-    if digest:
-        asset["digest"] = "sha256:" + hashlib.sha256(data).hexdigest()
-    return {"tag_name": tag, "published_at": published, "draft": draft, "assets": [asset]}
 
 
 @pytest.fixture
-def github(monkeypatch):
-    """Fake GitHub: a list of releases and the files behind their download URLs."""
-    state = {"releases": [], "files": {}, "downloads": 0}
+def upstream(monkeypatch):
+    """The author's newest release and a fake compiler that records what it built."""
+    state = {"tag": "v1.15.0+mc26.3", "builds": [], "fail": False}
 
-    async def get_json(url, **kw):
-        assert url == f"https://api.github.com/repos/{picolimbo.REPO}/releases"
-        return state["releases"]
+    async def latest_tag():
+        return state["tag"]
 
-    async def download(url, dest, *, sha256=None, **kw):
-        data = state["files"][url]
-        if sha256:
-            assert hashlib.sha256(data).hexdigest() == sha256, "checksum mismatch"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        state["downloads"] += 1
-        return dest
+    async def compile_release(tag, build):
+        if state["fail"]:
+            build.note("error[E0425]: cannot find value")
+            raise picolimbo.PicoLimboError("Polecenie cargo zakończyło się błędem (101)")
+        state["builds"].append(tag)
+        picolimbo.BIN_DIR.mkdir(parents=True, exist_ok=True)
+        picolimbo.BINARY.write_text(f"binary {tag}")
+        info = {"tag": tag, "version": picolimbo.display_version(tag), "patch": picolimbo.patch_id(),
+                "repo": picolimbo.REPO, "source": "build", "built_at": 1.0}
+        picolimbo.VERSION_FILE.write_text(json.dumps(info))
+        return info
 
-    monkeypatch.setattr(net, "get_json", get_json)
-    monkeypatch.setattr(net, "download", download)
-
-    def publish(tag, published, data=None, **kw):
-        data = data if data is not None else archive(f"binary {tag}".encode())
-        rel = release(tag, published, data, **kw)
-        state["releases"].append(rel)
-        state["files"][rel["assets"][0]["browser_download_url"]] = data
-        return rel
-
-    state["publish"] = publish
+    monkeypatch.setattr(picolimbo, "latest_tag", latest_tag)
+    monkeypatch.setattr(picolimbo, "compile_release", compile_release)
     return state
 
 
-def test_display_version():
-    assert picolimbo.display_version("picolimbo-v1.15.0+mc26.3-ab12cd34") == "1.15.0+mc26.3"
-    assert picolimbo.display_version("picolimbo-v1.16.0-beta.1+mc26.4-0011aabb") == "1.16.0-beta.1+mc26.4"
-    assert picolimbo.display_version(None) is None
+def test_source_comes_from_the_authors_repository():
+    assert picolimbo.REPO == "Quozul/PicoLimbo"
+    assert picolimbo.source_url("v1.15.0+mc26.3") == \
+        "https://github.com/Quozul/PicoLimbo/archive/refs/tags/v1.15.0%2Bmc26.3.tar.gz"
+    assert picolimbo.PATCH.is_file() and b"pico_limbo/src/auth.rs" in picolimbo.PATCH.read_bytes()
+    assert picolimbo.display_version("v1.15.0+mc26.3") == "1.15.0+mc26.3"
 
 
-def test_newest_release_ignores_other_releases_drafts_and_other_cpus():
-    data = archive()
-    rels = [
-        release("picolimbo-v1.14.1+mc26.3-aaaaaaaa", "2026-09-01T00:00:00Z", data),
-        release("v2.0.0", "2026-12-01T00:00:00Z", data),  # a MineNode app release, not PicoLimbo
-        release("picolimbo-v1.16.0+mc26.4-bbbbbbbb", "2026-11-30T00:00:00Z", data, draft=True),
-        release("picolimbo-v1.15.0+mc26.3-cccccccc", "2026-10-11T00:00:00Z", data),
-        release("picolimbo-v1.15.1+mc26.3-dddddddd", "2026-10-20T00:00:00Z", data, arch="aarch64"),
-    ]
-    assert picolimbo.newest_release(rels, "x86_64")["tag_name"] == "picolimbo-v1.15.0+mc26.3-cccccccc"
-    assert picolimbo.newest_release(rels, "aarch64")["tag_name"] == "picolimbo-v1.15.1+mc26.3-dddddddd"
-    assert picolimbo.newest_release([], "x86_64") is None
+def test_latest_tag_uses_the_release_page_when_the_api_refuses(monkeypatch):
+    async def api_limited(url, **kw):
+        raise RuntimeError("403 rate limit exceeded")
+
+    async def head(url, follow_redirects=False):
+        assert url == "https://github.com/Quozul/PicoLimbo/releases/latest"
+        return SimpleNamespace(headers={"location": "https://github.com/Quozul/PicoLimbo/releases/tag/v1.16.0+mc26.4"})
+
+    monkeypatch.setattr(net, "get_json", api_limited)
+    monkeypatch.setattr(net, "client", lambda: SimpleNamespace(head=head))
+    assert asyncio.run(picolimbo.latest_tag()) == "v1.16.0+mc26.4"
 
 
-def test_first_install_then_update_only_when_newer(github):
+def test_build_only_when_upstream_or_login_module_changes(upstream, monkeypatch):
     up = picolimbo.Updater()
-    github["publish"]("picolimbo-v1.15.0+mc26.3-aaaaaaaa", "2026-10-11T00:00:00Z")
     path = asyncio.run(up.binary())
-    assert path.read_bytes().startswith(b"binary picolimbo-v1.15.0")
-    assert path.stat().st_mode & 0o111  # executable
-    assert json.loads(picolimbo.VERSION_FILE.read_text())["version"] == "1.15.0+mc26.3"
-
-    assert asyncio.run(up.update()) is False  # same release: nothing downloaded again
-    assert github["downloads"] == 1
-
-    github["publish"]("picolimbo-v1.16.0+mc26.4-bbbbbbbb", "2026-12-01T00:00:00Z")
-    assert asyncio.run(up.update()) is True
-    assert path.read_bytes().startswith(b"binary picolimbo-v1.16.0")
-    status = up.status()
-    assert status["version"] == "1.16.0+mc26.4" and status["latest"] == "1.16.0+mc26.4" and status["error"] is None
+    assert path.read_text() == "binary v1.15.0+mc26.3" and upstream["builds"] == ["v1.15.0+mc26.3"]
+    assert asyncio.run(up.update()) is False  # same release, same module: no rebuild
+    upstream["tag"] = "v1.16.0+mc26.4"
+    assert asyncio.run(up.update()) is True and upstream["builds"][-1] == "v1.16.0+mc26.4"
+    monkeypatch.setattr(picolimbo, "patch_id", lambda: "deadbeef")  # login module changed
+    assert asyncio.run(up.update()) is True and len(upstream["builds"]) == 3
+    s = up.status()
+    assert s["version"] == "1.16.0+mc26.4" and s["source"] == "build" and s["repo"] == "Quozul/PicoLimbo"
+    assert not s["building"] and s["error"] is None and not s["legacy"]
 
 
-def test_only_the_binary_is_taken_from_the_archive(github, tmp_path):
-    evil = archive(extra=[("../../escape.sh", b"rm -rf /"), ("/abs/path", b"x")])
-    github["publish"]("picolimbo-v1.15.0+mc26.3-aaaaaaaa", "2026-10-11T00:00:00Z", evil)
-    asyncio.run(picolimbo.Updater().binary())
-    assert not (tmp_path / "escape.sh").exists() and not (tmp_path.parent / "escape.sh").exists()
-    assert sorted(p.name for p in picolimbo.BIN_DIR.iterdir()) == ["pico_limbo", "version.json"]
-
-
-def test_bad_or_missing_releases_keep_the_installed_binary(github):
+def test_a_binary_from_minenode_releases_is_replaced_by_a_local_build(upstream):
+    picolimbo.BIN_DIR.mkdir(parents=True)
+    picolimbo.BINARY.write_text("old prebuilt")
+    picolimbo.VERSION_FILE.write_text(json.dumps({"tag": "picolimbo-v1.15.0+mc26.3-7c0fed69",
+                                                  "repo": "BernardGFB1/Minenode"}))
     up = picolimbo.Updater()
-    with pytest.raises(picolimbo.PicoLimboError, match="nie ma jeszcze wydania"):
-        asyncio.run(up.binary())  # nothing released yet
+    assert up.ready_binary() == picolimbo.BINARY  # keeps the lobby running until the build is done
+    assert up.status()["legacy"] and up.status()["version"] is None and up.needs_build()
+    assert asyncio.run(up.update()) is True
+    assert picolimbo.BINARY.read_text() == "binary v1.15.0+mc26.3" and not up.needs_build()
 
-    github["publish"]("picolimbo-v1.15.0+mc26.3-aaaaaaaa", "2026-10-11T00:00:00Z")
+
+def test_a_failing_build_keeps_the_old_one_and_is_not_retried_in_a_loop(upstream):
+    up = picolimbo.Updater()
     asyncio.run(up.binary())
-    good = picolimbo.BINARY.read_bytes()
-
-    rel = github["publish"]("picolimbo-v1.16.0+mc26.4-bbbbbbbb", "2026-12-01T00:00:00Z")
-    github["files"][rel["assets"][0]["browser_download_url"]] = b"tampered"  # checksum no longer matches
+    upstream["tag"] = "v1.16.0+mc26.4"
+    upstream["fail"] = True
     assert asyncio.run(up.update()) is False
-    assert picolimbo.BINARY.read_bytes() == good and "Aktualizacja PicoLimbo" in up.error
+    assert picolimbo.BINARY.read_text() == "binary v1.15.0+mc26.3"
+    assert "cargo" in up.error and "E0425" in up.error  # the log tail is shown in the panel
+    upstream["fail"] = False
+    assert asyncio.run(up.update()) is False and upstream["builds"] == ["v1.15.0+mc26.3"]  # not again yet
+    assert asyncio.run(up.update(force=True)) is True  # the panel button retries at once
 
-    github["publish"]("picolimbo-v1.17.0+mc26.4-cccccccc", "2026-12-05T00:00:00Z", digest=False)  # no checksum
-    assert asyncio.run(up.update()) is False
-    assert picolimbo.BINARY.read_bytes() == good and "sumy kontrolnej" in up.error
+
+def test_missing_compiler_is_reported(monkeypatch):
+    monkeypatch.setattr(picolimbo.shutil, "which", lambda name: None)
+    with pytest.raises(picolimbo.PicoLimboError, match="gcc"):
+        asyncio.run(picolimbo.compile_release("v1.15.0+mc26.3", picolimbo.Build()))
+
+
+def test_source_archive_cannot_write_outside_the_build_folder(tmp_path):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        def add(name, data=b"x", kind=tarfile.REGTYPE, link=""):
+            info = tarfile.TarInfo(name)
+            info.type, info.linkname, info.size = kind, link, len(data) if kind == tarfile.REGTYPE else 0
+            tar.addfile(info, io.BytesIO(data) if kind == tarfile.REGTYPE else None)
+        add("PicoLimbo-1.15.0/Cargo.toml", b"[workspace]")
+        add("PicoLimbo-1.15.0/pico_limbo/src/main.rs", b"fn main(){}")
+        add("PicoLimbo-1.15.0/../../escape.sh", b"rm -rf /")
+        add("/abs/path", b"x")
+        add("PicoLimbo-1.15.0/link", kind=tarfile.SYMTYPE, link="/etc/passwd")
+    archive = tmp_path / "src.tar.gz"
+    archive.write_bytes(buf.getvalue())
+    root = picolimbo._extract_source(archive, tmp_path / "out")
+    assert (root / "pico_limbo" / "src" / "main.rs").is_file()
+    assert not (tmp_path / "escape.sh").exists() and not (root / "link").exists()
 
 
 def test_local_binary_override(tmp_path, monkeypatch):
@@ -141,6 +137,27 @@ def test_local_binary_override(tmp_path, monkeypatch):
     up = picolimbo.Updater()
     assert asyncio.run(up.binary()) == local
     assert asyncio.run(up.update()) is False and up.status()["source"] == "local"
+
+
+def test_lobby_start_does_not_wait_for_the_first_build(upstream):
+    async def scenario():
+        lobby = auth_lobby.AuthLobby(manager=None)
+        started = asyncio.Event()
+        orig = picolimbo.compile_release
+
+        async def slow(tag, build):
+            started.set()
+            await asyncio.sleep(3600)
+
+        picolimbo.compile_release = slow
+        try:
+            await asyncio.wait_for(lobby.start(), 1)  # returns at once
+            await asyncio.wait_for(started.wait(), 1)
+            assert "kompilowane" in lobby.error and lobby.updater.building
+        finally:
+            await lobby.stop()
+            picolimbo.compile_release = orig
+    asyncio.run(scenario())
 
 
 def test_lobby_restarts_only_after_an_update(monkeypatch):
@@ -156,10 +173,10 @@ def test_lobby_restarts_only_after_an_update(monkeypatch):
     monkeypatch.setattr(lobby, "_stop_process", stop)
     monkeypatch.setattr(lobby, "start", start)
 
-    async def no_update():
+    async def no_update(force=False):
         return False
 
-    async def updated():
+    async def updated(force=False):
         return True
 
     monkeypatch.setattr(lobby.updater, "update", no_update)

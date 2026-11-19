@@ -449,7 +449,6 @@ const strings = {
   'dostępna {v}': '{v} available',
   'sprawdzono {when}': 'checked {when}',
   'Sprawdź aktualizację PicoLimbo': 'Check for a PicoLimbo update',
-  'Panel pobiera PicoLimbo z modułem logowania z GitHuba ({repo}) i sam sprawdza nowe wersje co 6 godzin.': 'The panel downloads PicoLimbo with the login module from GitHub ({repo}) and checks for new versions every 6 hours.',
   'Zaktualizowano PicoLimbo do {v} – lobby uruchomione ponownie': 'PicoLimbo updated to {v} – lobby restarted',
   'PicoLimbo jest aktualne': 'PicoLimbo is up to date',
   'Lobby autoryzacji nie działa': 'The authentication lobby is not running',
@@ -1253,6 +1252,19 @@ const strings = {
   '{n} dni temu': '{n} days ago',
   '15 min': '15 min',
 
+  // PicoLimbo compiled on the server
+  'stara wersja z wydań MineNode': 'old build from MineNode releases',
+  'Kompilowanie PicoLimbo: {s}': 'Compiling PicoLimbo: {s}',
+  'od {when}': 'since {when}',
+  'Pierwsza kompilacja pobiera Rusta i trwa kilka minut. Serwery gry działają dalej; lobby korzysta z poprzedniej wersji, jeśli jest.': 'The first build downloads Rust and takes a few minutes. Game servers keep running; the lobby uses the previous build if there is one.',
+  'Panel pobiera kod PicoLimbo z repozytorium autora ({repo}), dodaje moduł logowania MineNode i kompiluje go na tym serwerze. Nowe wersje sprawdza co 6 godzin.': "The panel downloads PicoLimbo's source from its author's repository ({repo}), adds MineNode's login module and compiles it on this server. It checks for new versions every 6 hours.",
+  'Kompilowanie PicoLimbo rozpoczęte – postęp widać poniżej': 'PicoLimbo build started – progress is shown below',
+  'Przygotowanie': 'Preparing',
+  'Instalacja Rusta (rustup)': 'Installing Rust (rustup)',
+  'Pobieranie źródeł PicoLimbo': 'Downloading PicoLimbo source',
+  'Dodawanie modułu logowania': 'Adding the login module',
+  'Kompilacja (kilka minut)': 'Compiling (a few minutes)',
+  'PicoLimbo jest kompilowane na tym serwerze – lobby logowania ruszy po zakończeniu.': 'PicoLimbo is being compiled on this server – the login lobby starts when it is done.',
   // web map choice (squaremap / Dynmap / BlueMap) & server-side LOD
   'Serwer wysyła uproszczony teren daleko poza zasięg widzenia. Zainstaluj jeden z modów w wersji dla Minecrafta {v}, a od razu zobaczysz odległe góry i wybrzeża.': 'The server sends simplified terrain far beyond view distance. Install one of these mods for Minecraft {v} and you will see distant mountains and coastlines right away.',
   'Zamiast LOD Server Support może być Voxy Server Side – to ten sam mod.': 'Voxy Server Side works instead of LOD Server Support – it is the same mod.',
@@ -1603,6 +1615,9 @@ const patterns = [
   ['{a} nie ma wersji dla {b}', '{a} has no version for {b}'],
   ['{a} nie działa na silniku {b}', '{a} does not run on the {b} engine'],
   ['{a} nie działa na tym silniku.', '{a} does not run on this engine.'],
+  ['PicoLimbo: {a}', 'PicoLimbo: {a}'],
+  ['Polecenie {a} zakończyło się błędem ({b})', 'The {a} command failed ({b})'],
+  ['Do kompilacji PicoLimbo brakuje: {a}', 'Compiling PicoLimbo needs: {a}'],
 ]
 
 export default { strings, patterns }

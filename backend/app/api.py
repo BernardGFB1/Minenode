@@ -164,12 +164,22 @@ async def remove_user(username: str, me: str = Depends(auth.require_user)):
 
 @router.post("/player-auth/lobby/update")
 async def player_auth_lobby_update(_: str = Depends(auth.require_user)):
-    """Check GitHub for a newer PicoLimbo now (normally every few hours) and switch to it."""
+    """Check the author's repository for a newer PicoLimbo now (normally every few hours) and build it.
+
+    A build takes minutes, so it continues in the background; the answer comes back after a few seconds
+    with ``building: true`` and the panel follows the progress in the lobby status."""
     lobby = getattr(manager, "auth_lobby", None)
     if lobby is None:
         raise HTTPException(503, "Lobby autoryzacji nie działa")
-    changed = await lobby.check_for_update()
-    return {"updated": changed, "running": lobby.running, "error": lobby.error, "picolimbo": lobby.updater.status()}
+    if lobby.updater.building:
+        return {"updated": False, "building": True, "running": lobby.running, "error": lobby.error,
+                "picolimbo": lobby.updater.status()}
+    task = lobby._manual_update = asyncio.create_task(lobby.check_for_update(force=True))  # keep a reference
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(asyncio.shield(task), 4)
+    changed = task.done() and not task.cancelled() and task.result()
+    return {"updated": bool(changed), "building": not task.done(), "running": lobby.running, "error": lobby.error,
+            "picolimbo": lobby.updater.status()}
 
 
 @router.get("/player-auth/sessions")
