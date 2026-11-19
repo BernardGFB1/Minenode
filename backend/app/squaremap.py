@@ -43,6 +43,7 @@ _version_cache: dict[tuple[str, str], tuple[float, dict, str]] = {}
 _CONFIG_DEFAULTS = (
     (("settings", "internal-webserver", "enabled"), "false"),
     (("settings", "internal-webserver", "flush-json-immediately"), "true"),
+    (("settings", "render-progress-logging", "enabled"), "true"),
     (("settings", "web-directory", "path"), "web"),
 )
 

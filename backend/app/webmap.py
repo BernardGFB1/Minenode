@@ -418,6 +418,8 @@ async def _status(inst: "ServerInstance", pid: str, refresh: bool) -> dict:
 # ====================================================================== manual full render
 
 START_TIMEOUT = 45  # a world that does not confirm the render in time is skipped
+BLUEMAP_FIRST_POLL = 3.0  # let BlueMap queue the force-update before asking for its status
+BLUEMAP_POLL = 8.0
 
 _LOG = {
     "squaremap": (
@@ -434,6 +436,47 @@ _LOG = {
     ),
 }
 
+# squaremap logs "(37.50%) World: minecraft:overworld Chunks: 120/320 ... Rate: 4.2 cps"
+_SQUAREMAP_PROGRESS = re.compile(
+    r"\((?P<percent>[\d.,]+)%\)\s+World:\s+(?P<world>\S+)\s+"
+    r"(?:Regions:\s+[\d,]+/[\d,]+\s+)?"
+    r"Chunks:\s+(?P<done>[\d,]+)/(?P<total>[\d,]+)\s+"
+    r"Elapsed:\s+(?P<elapsed>\S+)\s+ETA:\s+(?P<eta>\S+)\s+Rate:\s+(?P<rate>[\d.,]+)\s+cps"
+)
+# Dynmap never reports a total, only the number of tiles rendered so far.
+_DYNMAP_PROGRESS = re.compile(
+    r"Full render of (?:map '[^']+'|maps \[[^\]]+\]) of '(?P<world>[^']+)' in progress - "
+    r"(?P<count>[\d,]+) tiles rendered(?: each)? \((?P<msec>[\d.,]+) msec/(?:map-)?tile"
+)
+# "/bluemap" status output: "map <id> is currently being updated", "progress: 12.345%",
+# "remaining time: 1 minute 20 seconds" and "N render-threads are idle" when the queue is empty.
+_BLUEMAP_MAP = re.compile(r"\bmap\s+(?P<map>.+?)\s+is currently being (?:updated|purged)")
+_BLUEMAP_PROGRESS = re.compile(r"\bprogress:\s*(?P<percent>[\d.,]+)\s*%")
+_BLUEMAP_ETA = re.compile(r"\bremaining time:\s*(?P<eta>.+?)\s*$")
+_BLUEMAP_IDLE = re.compile(r"\brender-threads?\s+(?:is|are)\s+idle\b")
+_BLUEMAP_PAUSED = re.compile(r"\brender-threads?\s+(?:is|are)\s+paused\b")
+_MC_CODE = re.compile(r"§.")
+
+
+def _as_float(raw: str) -> float:
+    raw = raw.strip().replace(" ", "").rstrip("%")
+    if "," in raw and "." not in raw:
+        raw = raw.replace(",", ".")
+    else:
+        raw = raw.replace(",", "")
+    return float(raw)
+
+
+def _as_int(raw: str) -> int:
+    return int(re.sub(r"\D", "", raw) or 0)
+
+
+def _bluemap_map_count(inst: "ServerInstance") -> int:
+    try:
+        return max(1, len(list((bluemap_dir(inst) / "maps").glob("*.conf"))))
+    except OSError:
+        return 1
+
 
 class MapRender:
     """A full render started from the panel: worlds one after another, never automatically."""
@@ -446,15 +489,37 @@ class MapRender:
         self.requested_at: Optional[float] = None
         self.finished_at: Optional[float] = None
         self.provider: Optional[str] = None
+        self.total_worlds = 0
+        self.finished_worlds = 0
+        self.percent: Optional[float] = None
+        self.world_percent: Optional[float] = None
+        self.processed: Optional[int] = None
+        self.processed_total: Optional[int] = None
+        self.rate: Optional[float] = None
+        self.eta: Optional[str] = None
+        self.elapsed: Optional[str] = None
+        self.unit: Optional[str] = None
+        self.paused = False
+        self.bluemap_active = False
+        self._bluemap_next = 0.0
 
     @property
     def running(self) -> bool:
-        return bool(self.current or self.awaiting or self.queue)
+        return bool(self.current or self.awaiting or self.queue or self.bluemap_active)
 
     def status(self) -> dict:
-        return {"running": self.running, "current": self.current or (self.awaiting or (None,))[0],
-                "queue": list(self.queue), "requested_at": self.requested_at, "finished_at": self.finished_at,
-                "provider": self.provider}
+        def rounded(value: Optional[float]) -> Optional[float]:
+            return round(value, 1) if value is not None else None
+
+        return {
+            "running": self.running, "current": self.current or (self.awaiting or (None,))[0],
+            "queue": list(self.queue), "requested_at": self.requested_at, "finished_at": self.finished_at,
+            "provider": self.provider, "percent": rounded(self.percent),
+            "world_percent": rounded(self.world_percent), "processed": self.processed,
+            "total": self.processed_total, "rate": rounded(self.rate), "eta": self.eta,
+            "elapsed": self.elapsed, "unit": self.unit, "worlds_done": self.finished_worlds,
+            "worlds_total": self.total_worlds, "paused": self.paused,
+        }
 
     def _worlds(self, pid: str) -> list[str]:
         if pid == "squaremap":
@@ -463,6 +528,20 @@ class MapRender:
 
     def _send(self, cmd: str) -> None:
         self.inst.spawn(self.inst.send_command(cmd, echo=False))
+
+    def _sync_percent(self) -> None:
+        """Overall progress across the worlds; Dynmap reports no total, so it keeps ``None``."""
+        if self.provider == "dynmap" or not self.total_worlds:
+            return
+        fraction = 0.0 if self.world_percent is None else max(0.0, min(100.0, self.world_percent)) / 100.0
+        self.percent = min(100.0, (self.finished_worlds + fraction) / self.total_worlds * 100.0)
+
+    def _reset_progress(self) -> None:
+        self.percent = None if self.provider == "dynmap" else 0.0
+        self.world_percent = None if self.provider == "dynmap" else 0.0
+        self.processed = self.processed_total = None
+        self.rate = self.eta = self.elapsed = None
+        self.paused = False
 
     def start(self) -> dict:
         inst = self.inst
@@ -474,30 +553,51 @@ class MapRender:
         if self.running:
             raise ModpackError("Mapa już się renderuje")
         self.provider, self.requested_at, self.finished_at = pid, time.time(), None
+        self.finished_worlds = 0
+        self._reset_progress()
         if pid == "bluemap":
             # BlueMap renders every map in the background and reports progress in /bluemap.
+            self.total_worlds = _bluemap_map_count(inst)
+            self.unit = None
+            self.bluemap_active = True
+            self._bluemap_next = time.time() + BLUEMAP_FIRST_POLL
             self._send("bluemap force-update")
             inst.panel_log("BlueMap: ponowne renderowanie wszystkich map rozpoczęte.")
             return self.status()
         self.queue = self._worlds(pid)
+        self.total_worlds = len(self.queue)
+        self.unit = "chunks" if pid == "squaremap" else "tiles"
         inst.panel_log(f"{INFO[pid]['title']}: renderowanie mapy rozpoczęte ({', '.join(self.queue)}).")
         self._next(time.time())
         return self.status()
 
     def cancel(self) -> None:
         pid = self.provider or provider(self.inst)
+        inst = self.inst
+        if pid == "bluemap":
+            if self.bluemap_active and inst.state == "online":
+                self._send("bluemap tasks cancel all")
+            self.bluemap_active = False
+            self.current = None
+            self.eta = None
+            inst.panel_log("Renderowanie mapy przerwane.")
+            return
         world = self.current or (self.awaiting or (None,))[0]
         self.queue.clear()
         self.awaiting = None
-        if world and self.inst.state == "online":
-            label = squaremap.command_label(self.inst) if pid == "squaremap" else "dynmap"
+        if world and inst.state == "online":
+            label = squaremap.command_label(inst) if pid == "squaremap" else "dynmap"
             self._send(f"{label} cancelrender {world}")
         self.current = None
-        self.inst.panel_log("Renderowanie mapy przerwane.")
+        inst.panel_log("Renderowanie mapy przerwane.")
 
     def _next(self, now: float) -> None:
         if not self.queue:
             self.current, self.awaiting = None, None
+            self.finished_worlds = self.total_worlds
+            self.world_percent = 100.0
+            self.percent = 100.0
+            self.rate = self.eta = None
             if self.requested_at and not self.finished_at:
                 self.finished_at = now
                 self.inst.panel_log("Mapa została wyrenderowana.")
@@ -506,11 +606,40 @@ class MapRender:
         pid = self.provider or provider(self.inst)
         label = squaremap.command_label(self.inst) if pid == "squaremap" else "dynmap"
         self.awaiting = (world, now)
+        self.processed = self.processed_total = None
+        self.rate = self.eta = self.elapsed = None
+        self.world_percent = None if pid == "dynmap" else 0.0
+        self._sync_percent()
         self._send(f"{label} fullrender {world}")
 
     def on_line(self, plain: str) -> None:
         pid = self.provider
-        if not pid or pid not in _LOG or not (self.current or self.awaiting):
+        if not pid:
+            return
+        plain = _MC_CODE.sub("", plain)
+        if pid == "bluemap":
+            self._on_bluemap_line(plain)
+            return
+        if pid not in _LOG or not (self.current or self.awaiting):
+            return
+        if pid == "squaremap" and (m := _SQUAREMAP_PROGRESS.search(plain)):
+            world = squaremap._world_id(m.group("world"))
+            self.current, self.awaiting = world, None
+            self.world_percent = _as_float(m.group("percent"))
+            self.processed = _as_int(m.group("done"))
+            self.processed_total = _as_int(m.group("total"))
+            self.rate = _as_float(m.group("rate"))
+            self.eta = m.group("eta")
+            self.elapsed = m.group("elapsed")
+            self._sync_percent()
+            return
+        if pid == "dynmap" and (m := _DYNMAP_PROGRESS.search(plain)):
+            self.current, self.awaiting = m.group("world").strip(), None
+            self.processed = _as_int(m.group("count"))
+            try:
+                self.rate = round(1000.0 / _as_float(m.group("msec")), 1)
+            except (ValueError, ZeroDivisionError):
+                self.rate = None
             return
         for pattern, kind in _LOG[pid]:
             m = pattern.search(plain)
@@ -520,17 +649,85 @@ class MapRender:
             if pid == "squaremap":
                 world = squaremap._world_id(world)
             if kind == "started":
+                if self.current != world:
+                    self.processed = self.processed_total = None
+                    self.rate = self.eta = self.elapsed = None
+                    self.world_percent = None if pid == "dynmap" else 0.0
                 self.current, self.awaiting = world, None
-            elif kind == "finished" and world == self.current:
+                self._sync_percent()
+            elif kind == "finished" and world == (self.current or (self.awaiting or (None,))[0]):
                 self.current = None
+                self.awaiting = None
+                self.finished_worlds += 1
+                if self.total_worlds:
+                    self.finished_worlds = min(self.finished_worlds, self.total_worlds)
+                self.world_percent = 100.0
                 self._next(time.time())
             return
 
+    def _on_bluemap_line(self, plain: str) -> None:
+        if not self.bluemap_active:
+            return
+        if m := _BLUEMAP_PROGRESS.search(plain):
+            try:
+                self.world_percent = _as_float(m.group("percent"))
+            except ValueError:
+                return
+            self._sync_percent()
+            # BlueMap prints "progress: … • remaining time: …" on one line.
+            if e := _BLUEMAP_ETA.search(plain):
+                self.eta = e.group("eta").strip()
+            return
+        if m := _BLUEMAP_MAP.search(plain):
+            world = m.group("map").strip().strip("'\"")
+            if self.current and world != self.current:
+                self.finished_worlds += 1
+                if self.total_worlds:
+                    self.finished_worlds = min(self.finished_worlds, self.total_worlds)
+                self.world_percent = 0.0
+            self.current = world
+            self.paused = False
+            return
+        if m := _BLUEMAP_ETA.search(plain):
+            self.eta = m.group("eta").strip()
+            return
+        if _BLUEMAP_IDLE.search(plain):
+            self._finish_bluemap()
+            return
+        if _BLUEMAP_PAUSED.search(plain):
+            self.paused = True
+
+    def _finish_bluemap(self, now: Optional[float] = None) -> None:
+        if not self.bluemap_active:
+            return
+        self.bluemap_active = False
+        self.current = None
+        self.finished_worlds = self.total_worlds
+        self.world_percent = 100.0
+        self.percent = 100.0
+        self.eta = None
+        self.paused = False
+        if self.requested_at and not self.finished_at:
+            self.finished_at = now or time.time()
+            self.inst.panel_log("Mapa została wyrenderowana.")
+
     def tick(self, now: float) -> None:
+        if self.bluemap_active:
+            if now >= self._bluemap_next:
+                self._bluemap_next = now + BLUEMAP_POLL
+                if self.inst.state == "online":
+                    self._send("bluemap")
+            return
         if self.awaiting and now - self.awaiting[1] >= START_TIMEOUT:
             self.awaiting = None  # unknown or disabled dimension
+            self.finished_worlds += 1
+            if self.total_worlds:
+                self.finished_worlds = min(self.finished_worlds, self.total_worlds)
+            self.world_percent = 100.0
             self._next(now)
 
     def on_stop(self) -> None:
         self.queue.clear()
         self.current = self.awaiting = None
+        self.bluemap_active = False
+        self.eta = None

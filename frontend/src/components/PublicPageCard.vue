@@ -64,14 +64,29 @@
         </template>
 
         <template v-if="v.enabled">
-          <div class="render">
-            <div class="grow col" style="gap: 2px">
-              <b class="small">{{ $t('Generowanie mapy') }}</b>
-              <span class="tiny muted">{{ renderText }}</span>
+          <div class="render" :class="{ running: renderRunning }">
+            <div class="row" style="gap: 12px; align-items: center">
+              <div class="grow col" style="gap: 2px">
+                <b class="small">{{ $t('Generowanie mapy') }}</b>
+                <span class="tiny muted">{{ renderText }}</span>
+              </div>
+              <div v-if="renderRunning && renderPercent !== null" class="pct num">{{ renderPercentLabel }}</div>
+              <button v-if="renderRunning" class="btn sm" :disabled="renderBusy" @click="render('cancel')"><Square /> {{ $t('Przerwij') }}</button>
+              <button v-else class="btn sm" :disabled="renderBusy || !v.online" :title="v.online ? '' : $t('Uruchom serwer, żeby wygenerować mapę')" @click="render('start')">
+                <Loader2 v-if="renderBusy" class="spin" /><Play v-else /> {{ $t('Wygeneruj mapę') }}</button>
             </div>
-            <button v-if="renderRunning" class="btn sm" :disabled="renderBusy" @click="render('cancel')"><Square /> {{ $t('Przerwij') }}</button>
-            <button v-else class="btn sm" :disabled="renderBusy || !v.online" :title="v.online ? '' : $t('Uruchom serwer, żeby wygenerować mapę')" @click="render('start')">
-              <Loader2 v-if="renderBusy" class="spin" /><Play v-else /> {{ $t('Wygeneruj mapę') }}</button>
+            <div v-if="renderRunning" class="progress" :class="{ indeterminate: renderPercent === null }">
+              <div :style="renderPercent !== null ? { width: Math.min(100, renderPercent) + '%' } : undefined" />
+            </div>
+            <div v-if="renderRunning && (renderWorldsLabel || renderCountLabel || renderRateLabel || renderEtaLabel || renderPaused)"
+                 class="row wrap tiny muted" style="gap: 4px 16px">
+              <span v-if="renderWorldsLabel">{{ renderWorldsLabel }}</span>
+              <span v-if="renderCountLabel">{{ renderCountLabel }}</span>
+              <span v-if="renderRateLabel">{{ renderRateLabel }}</span>
+              <span v-if="renderEtaLabel">{{ renderEtaLabel }}</span>
+              <span v-if="renderPaused">{{ $t('BlueMap wstrzymał renderowanie, dopóki na serwerze są gracze.') }}</span>
+            </div>
+            <div v-if="renderNoPercent" class="tiny muted">{{ $t('Ta mapa nie podaje procentu – postęp widać po liczbie kafelków.') }}</div>
           </div>
 
           <dl class="info">
@@ -123,17 +138,60 @@ let timer = null
 const pageUrl = computed(() => v.value?.public_url || `/${props.subdomain}/stats`)
 const fullUrl = computed(() => `${window.location.origin}${pageUrl.value}`)
 const cur = computed(() => v.value?.current || {})
-const renderRunning = computed(() => !!v.value?.render?.running)
+const renderState = computed(() => v.value?.render || null)
+const renderRunning = computed(() => !!renderState.value?.running)
+const renderPercent = computed(() => typeof renderState.value?.percent === 'number' ? renderState.value.percent : null)
+const renderPercentLabel = computed(() => renderPercent.value === null ? ''
+  : `${renderPercent.value.toFixed(renderPercent.value >= 100 ? 0 : 1)}%`)
+const renderWorldsLabel = computed(() => {
+  const r = renderState.value
+  if (!r?.running || (r.worlds_total || 0) <= 1) return ''
+  const done = Math.min(r.worlds_done || 0, r.worlds_total)
+  const index = Math.min(done + 1, r.worlds_total)
+  return t('Świat {a} z {b}', { a: index, b: r.worlds_total })
+})
+const renderCountLabel = computed(() => {
+  const r = renderState.value
+  if (r?.processed == null) return ''
+  const unit = r.unit === 'tiles' ? t('Kafelki') : t('Chunki')
+  const done = Number(r.processed).toLocaleString()
+  const total = r.total != null ? ' / ' + Number(r.total).toLocaleString() : ''
+  return `${unit}: ${done}${total}`
+})
+const renderRateLabel = computed(() => {
+  const r = renderState.value
+  if (!r?.rate) return ''
+  const n = Number(r.rate).toLocaleString()
+  return r.unit === 'tiles' ? t('Tempo: {n} kafelków/s', { n }) : t('Tempo: {n} chunków/s', { n })
+})
+const renderEtaLabel = computed(() => renderState.value?.eta ? t('Pozostało: {t}', { t: renderState.value.eta }) : '')
+const renderPaused = computed(() => renderRunning.value && !!renderState.value?.paused)
+const renderNoPercent = computed(() => renderRunning.value && renderPercent.value === null)
 const viewHint = computed(() => v.value?.provider === 'bluemap'
   ? (v.value.render_3d ? 'Modele 3D bloków – najładniej, ale renderowanie trwa dłużej i zajmuje więcej miejsca.' : 'Tylko płaski widok z góry – szybkie renderowanie i mało miejsca na dysku.')
   : (v.value?.render_3d ? 'Mapa płaska i izometryczna (ukośny widok terenu).' : 'Tylko płaska mapa – najmniej pracy dla serwera.'))
 const renderText = computed(() => {
-  const r = v.value?.render
-  if (r?.running) return t('Teraz renderuje się {w}. Kolejne światy: {n}.', { w: r.current || '…', n: r.queue.length })
+  const r = renderState.value
+  if (r?.running) {
+    const world = worldLabel(r.current)
+    const left = r.queue?.length || 0
+    if (world && left) return t('Teraz renderuje się {w}. Kolejne światy: {n}.', { w: world, n: left })
+    if (world) return t('Teraz renderuje się {w}.', { w: world })
+    return t('Przygotowywanie renderowania…')
+  }
   if (v.value?.provider === 'bluemap') return t('BlueMap sam renderuje zmienione i nowe chunki. Przycisk renderuje wszystkie mapy od nowa – przydaje się po zmianie widoku.')
   const done = r?.finished_at ? ' ' + t('Ostatnio: {d}.', { d: new Date(r.finished_at * 1000).toLocaleString() }) : ''
   return t('Nowe i zmienione chunki pojawiają się na mapie same. Teren sprzed włączenia mapy dorysuje pełny render – uruchamiasz go tylko tym przyciskiem.') + done
 })
+
+function worldLabel(id) {
+  if (!id) return ''
+  const s = String(id).toLowerCase()
+  if (s === 'dim-1' || s.includes('nether')) return t('Nether')
+  if (s === 'dim1' || s.includes('the_end') || s.endsWith('_end')) return t('End')
+  if (s === 'world' || s.includes('overworld')) return t('Overworld')
+  return id
+}
 
 async function load() {
   try { v.value = await api.get(`/servers/${props.serverId}/webmap`) } catch (e) { toastError(e) }
@@ -203,7 +261,9 @@ async function doRestart() {
 .prov:disabled { cursor: not-allowed; }
 .prov.off { opacity: 0.6; }
 .prov b { font-size: 13px; }
-.render { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.render { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 10px 12px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--surface-2); }
+.render.running { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.pct { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; flex: none; }
 .seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
 .seg button { height: 26px; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .seg button.active { background: var(--surface-3); color: var(--text); }

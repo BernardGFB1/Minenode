@@ -671,10 +671,10 @@ class ServerInstance:
                 if m := r.search(plain):
                     self.record_attempt(m.group(1), None, "log")
                     break
-        elif "render" in plain and self._map_render is not None:
-            self._map_render.on_line(plain)
         elif "Task " in plain or "No tasks" in plain:
             self.chunky_runner.on_line(plain)
+        elif self._map_render is not None and (self._map_render.running or "render" in plain):
+            self._map_render.on_line(plain)
 
     def _add_chat(self, name: str, text: str, at: float | None = None) -> None:
         name = MC_CODE_RE.sub("", name).strip()
@@ -1083,6 +1083,7 @@ class Manager:
             if inst.cfg.installed and inst.cfg.auto_start:
                 inst.spawn(self._safe_start(inst))
         self._tasks.append(asyncio.create_task(self._sampler()))
+        self._tasks.append(asyncio.create_task(self._map_ticker()))
         self._tasks.append(asyncio.create_task(self._scheduler()))
 
     async def _safe_start(self, inst: ServerInstance) -> None:
@@ -1099,6 +1100,19 @@ class Manager:
                     inst.sample()
                 except Exception:
                     log.exception("sample failed")
+
+    async def _map_ticker(self) -> None:
+        """Poll map render progress (BlueMap only answers /bluemap, the others log progress)."""
+        while True:
+            await asyncio.sleep(5)
+            now = time.time()
+            for inst in list(self.instances.values()):
+                if inst._map_render is None:
+                    continue
+                try:
+                    inst._map_render.tick(now)
+                except Exception:
+                    log.exception("map render tick failed for %s", inst.cfg.id)
 
     async def _scheduler(self) -> None:
         while True:

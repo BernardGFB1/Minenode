@@ -172,17 +172,26 @@ def test_render_runs_world_by_world_only_when_asked(tmp_path):
     assert sent == []  # never on its own
     r.start()
     assert sent == ["squaremap fullrender minecraft:overworld"]
+    assert r.status()["percent"] == 0 and r.status()["unit"] == "chunks" and r.status()["worlds_total"] == 3
     with pytest.raises(ModpackError):
         r.start()  # already running
     r.on_line("[squaremap] Started full map render for minecraft:overworld")
     assert r.status()["current"] == "minecraft:overworld"
+    r.on_line("[squaremap] (37.50%) World: minecraft:overworld Regions: 3/8 Chunks: 120/320 "
+              "Elapsed: 00:01:20 ETA: 00:02:00 Rate: 4.2 cps")
+    progress = r.status()
+    assert progress["percent"] == 12.5 and progress["world_percent"] == 37.5
+    assert progress["processed"] == 120 and progress["total"] == 320 and progress["rate"] == 4.2
+    assert progress["eta"] == "00:02:00"
     r.on_line("[squaremap] Finished rendering map for minecraft:overworld")
     assert sent[-1] == "squaremap fullrender minecraft:the_nether"
+    assert r.status()["percent"] == pytest.approx(33.3) and r.status()["worlds_done"] == 1
     r.tick(time_after := 10 ** 12)  # the Nether never confirms: skipped after the timeout
     assert sent[-1] == "squaremap fullrender minecraft:the_end"
+    assert r.status()["percent"] == pytest.approx(66.7)
     r.on_line("[squaremap] Started full map render for minecraft:the_end")
     r.on_line("[squaremap] Finished rendering map for minecraft:the_end")
-    assert not r.running and r.status()["finished_at"]
+    assert not r.running and r.status()["finished_at"] and r.status()["percent"] == 100
     assert time_after
 
 
@@ -191,7 +200,12 @@ def test_dynmap_render_and_cancel(tmp_path):
     r = webmap.MapRender(inst)
     r.start()
     assert sent == ["dynmap fullrender world"]
+    assert r.status()["percent"] is None and r.status()["unit"] == "tiles"
     r.on_line("[dynmap] Full render starting on world 'world'...")
+    r.on_line("[dynmap] Full render of map 'flat' of 'world' in progress - 1,200 tiles rendered "
+              "(25.00 msec/tile, 10.00 msec per render)")
+    progress = r.status()
+    assert progress["processed"] == 1200 and progress["rate"] == 40.0 and progress["percent"] is None
     r.on_line("[dynmap] Full render of 'world' finished.")
     assert sent[-1] == "dynmap fullrender DIM-1"
     r.on_line("[dynmap] Full render starting on world 'DIM-1'...")
@@ -199,11 +213,37 @@ def test_dynmap_render_and_cancel(tmp_path):
     assert sent[-1] == "dynmap cancelrender DIM-1" and not r.running
 
 
-def test_bluemap_render_and_offline_server(tmp_path):
+def test_bluemap_render_progress_and_cancel(tmp_path):
     inst, sent, _ = _inst(tmp_path, "paper", provider="bluemap")
+    maps = tmp_path / "plugins" / "BlueMap" / "maps"
+    maps.mkdir(parents=True)
+    for name in ("world", "world_nether", "world_the_end"):
+        (maps / f"{name}.conf").write_text(f"name: \"{name}\"\n")
     r = webmap.MapRender(inst)
     r.start()
-    assert sent == ["bluemap force-update"] and not r.running
+    assert sent == ["bluemap force-update"] and r.running
+    assert r.status()["worlds_total"] == 3 and r.status()["percent"] == 0
+    r.tick(r.requested_at + webmap.BLUEMAP_FIRST_POLL + 1)
+    assert sent[-1] == "bluemap"
+    r.on_line("[Server thread/INFO]: [BlueMap] map world is currently being updated")
+    r.on_line("[Server thread/INFO]: [BlueMap] progress: 25.000% ● remaining time: 1 minute 20 seconds")
+    progress = r.status()
+    assert progress["current"] == "world" and progress["world_percent"] == 25.0
+    assert progress["percent"] == pytest.approx(8.3) and progress["eta"] == "1 minute 20 seconds"
+    r.on_line("[Server thread/INFO]: [BlueMap] map world_nether is currently being updated")
+    r.on_line("[Server thread/INFO]: [BlueMap] progress: 50.000%")
+    assert r.status()["percent"] == 50.0 and r.status()["worlds_done"] == 1
+    r.on_line("[Server thread/INFO]: [BlueMap] map world_the_end is currently being updated")
+    r.on_line("[Server thread/INFO]: [BlueMap] progress: 10.000%")
+    assert r.status()["percent"] == pytest.approx(70.0) and r.status()["worlds_done"] == 2
+    r.on_line("[Server thread/INFO]: [BlueMap] 1 render-thread is idle")
+    assert not r.running and r.status()["percent"] == 100 and r.status()["finished_at"]
+
+    r.start()
+    r.tick(r.requested_at + webmap.BLUEMAP_FIRST_POLL + 1)
+    r.cancel()
+    assert sent[-1] == "bluemap tasks cancel all" and not r.running
+
     inst.state = "offline"
     with pytest.raises(ModpackError):
         webmap.MapRender(inst).start()
@@ -214,6 +254,27 @@ def test_squaremap_player_markers_follow_the_option(tmp_path):
     squaremap.write_config(inst)
     text = (tmp_path / "plugins" / "squaremap" / "config.yml").read_text()
     assert "world-settings:\n  default:\n    player-tracker:\n      enabled: false" in text
+
+
+def test_squaremap_progress_logging_is_enabled(tmp_path):
+    inst, _, _ = _inst(tmp_path, "paper")
+    squaremap.write_config(inst)
+    text = (tmp_path / "plugins" / "squaremap" / "config.yml").read_text()
+    assert "render-progress-logging:\n    enabled: true" in text
+
+
+def test_manager_forwards_progress_lines_without_the_word_render(tmp_path):
+    from app.manager import ServerInstance
+
+    inst, _, _ = _inst(tmp_path, "paper", provider="squaremap")
+    r = webmap.MapRender(inst)
+    r.start()
+    r.on_line("[squaremap] Started full map render for minecraft:overworld")
+    server = object.__new__(ServerInstance)
+    server._waiters, server.state, server._map_render = [], "online", r
+    server._parse_line("[12:00:00] [Server thread/INFO]: [squaremap] (50.00%) World: minecraft:overworld "
+                       "Chunks: 160/320 Elapsed: 00:01:00 ETA: 00:01:00 Rate: 2.6 cps")
+    assert r.status()["processed"] == 160 and r.status()["world_percent"] == 50.0
 
 
 # ---------------------------------------------------------------- managed jars
