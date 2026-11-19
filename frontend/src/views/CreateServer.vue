@@ -49,7 +49,7 @@
                 <label>{{ $t('Subdomena') }}</label>
                 <div class="input-group">
                   <input v-model="form.subdomain" class="input mono" :placeholder="autoSub || 'survival'" @input="subTouched = true" />
-                  <span class="addon">.{{ settings?.base_domain || $t('twoja-domena') }}</span>
+                  <DomainAddon v-model="form.domain" :settings="settings" />
                 </div>
                 <span class="hint">{{ $t('Gracze połączą się pod adresem') }} <b class="mono">{{ address }}</b></span>
               </div>
@@ -109,6 +109,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Package, Upload, CheckCircle2, Coffee, Loader2, Rocket } from 'lucide-vue-next'
 import VersionPicker from '../components/VersionPicker.vue'
+import DomainAddon from '../components/DomainAddon.vue'
 import RamPicker from '../components/RamPicker.vue'
 import EngineIcon from '../components/EngineIcon.vue'
 import WorldgenPicker from '../components/WorldgenPicker.vue'
@@ -126,14 +127,14 @@ const sys = ref(null)
 const busy = ref(false)
 const subTouched = ref(false)
 const form = reactive({
-  type: 'paper', mc_version: '', loader_version: null, name: '', subdomain: '', eula: false,
+  type: 'paper', mc_version: '', loader_version: null, name: '', subdomain: '', domain: null, eula: false,
   java: { min_ram_mb: 2048, max_ram_mb: 4096, flags_preset: 'aikar', extra_jvm_args: '', extra_server_args: '' },
 })
 const autoSub = computed(() => slugify(form.name))
 const address = computed(() => {
   const sub = form.subdomain || autoSub.value || 'serwer'
   const port = settings.value && settings.value.proxy_port !== 25565 ? `:${settings.value.proxy_port}` : ''
-  return `${sub}.${settings.value?.base_domain || settings.value?.public_address || t('twoja-domena')}${port}`
+  return `${sub}.${form.domain || settings.value?.domains?.[0] || settings.value?.public_address || t('twoja-domena')}${port}`
 })
 const otherBytes = computed(() => fleet.servers.reduce((a, s) => a + s.max_ram_mb * 1048576, 0))
 // Same defaults a server gets without the wizard.

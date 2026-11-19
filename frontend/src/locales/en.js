@@ -1265,6 +1265,16 @@ const strings = {
   'Dodawanie modułu logowania': 'Adding the login module',
   'Kompilacja (kilka minut)': 'Compiling (a few minutes)',
   'PicoLimbo jest kompilowane na tym serwerze – lobby logowania ruszy po zakończeniu.': 'PicoLimbo is being compiled on this server – the login lobby starts when it is done.',
+  // several main domains
+  'Domeny główne': 'Main domains',
+  'domyślna': 'default',
+  'np. mc.druga-domena.pl': 'e.g. mc.second-domain.com',
+  'Usuń domenę': 'Remove domain',
+  'Dodaj domenę': 'Add domain',
+  'Każdy serwer działa pod': 'Every server answers as',
+  'oraz pod {n} kolejnymi domenami. Pierwsza jest domyślna – w ustawieniach serwera możesz wybrać, którą pokazywać graczom.': 'and under {n} more domain(s). The first one is the default – a server\'s settings choose which one players see.',
+  'Domena główna': 'Main domain',
+  'Działa też pod:': 'Also reachable as:',
   // web map choice (squaremap / Dynmap / BlueMap) & server-side LOD
   'Serwer wysyła uproszczony teren daleko poza zasięg widzenia. Zainstaluj jeden z modów w wersji dla Minecrafta {v}, a od razu zobaczysz odległe góry i wybrzeża.': 'The server sends simplified terrain far beyond view distance. Install one of these mods for Minecraft {v} and you will see distant mountains and coastlines right away.',
   'Zamiast LOD Server Support może być Voxy Server Side – to ten sam mod.': 'Voxy Server Side works instead of LOD Server Support – it is the same mod.',
@@ -1618,6 +1628,8 @@ const patterns = [
   ['PicoLimbo: {a}', 'PicoLimbo: {a}'],
   ['Polecenie {a} zakończyło się błędem ({b})', 'The {a} command failed ({b})'],
   ['Do kompilacji PicoLimbo brakuje: {a}', 'Compiling PicoLimbo needs: {a}'],
+  ['Domeny {a} nie ma na liście domen głównych panelu', 'The domain {a} is not on the panel\'s list of main domains'],
+  ['Niepoprawna domena: {a}', 'Invalid domain: {a}'],
 ]
 
 export default { strings, patterns }

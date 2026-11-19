@@ -29,7 +29,7 @@ from .models import ChunkySettings
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
-from .models import BackupSchedule, JavaConfig, ModpackInfo, PanelSettings, ServerConfig, ServerType, SERVER_TYPES
+from .models import BackupSchedule, HOSTNAME_RE, JavaConfig, ModpackInfo, PanelSettings, ServerConfig, ServerType, SERVER_TYPES
 from .properties import MANAGED_KEYS, read_properties, update_properties
 
 router = APIRouter(prefix="/api")
@@ -298,6 +298,7 @@ async def get_settings(_: str = Depends(auth.require_user)):
     d["curseforge_configured"] = bool(cf_key())
     d["curseforge_from_env"] = bool(CURSEFORGE_API_KEY_ENV) and not s.curseforge_api_key
     d["proxy_port"] = PROXY_PORT
+    d["domains"] = s.domains()
     d["defaults"] = {k: PanelSettings.model_fields[k].default for k in TEXT_SETTINGS}
     d["resource_pack_base"] = rpacks.public_base(manager)
     from .config import VOICE_PORT
@@ -321,6 +322,7 @@ TEXT_SETTINGS = ("public_panel_url", "pack_subdomain", "motd_offline", "motd_sta
 
 class SettingsBody(BaseModel):
     base_domain: Optional[str] = None
+    extra_domains: Optional[list[str]] = Field(default=None, max_length=50)
     default_server_id: Optional[str] = None
     curseforge_api_key: Optional[str] = None
     public_address: Optional[str] = None
@@ -336,14 +338,29 @@ class SettingsBody(BaseModel):
     kick_waking: Optional[str] = Field(default=None, max_length=500)
 
 
+def _clean_domain(raw: str) -> str:
+    d = (raw or "").strip().lower().strip(".")
+    if d.startswith("*."):
+        d = d[2:]
+    if d and not HOSTNAME_RE.match(d):
+        raise HTTPException(400, f"Niepoprawna domena: {raw}")
+    return d
+
+
 @router.put("/settings")
 async def put_settings(body: SettingsBody, _: str = Depends(auth.require_user)):
     s = manager.settings
     if body.base_domain is not None:
-        bd = body.base_domain.strip().lower().strip(".")
-        if bd and not re.match(r"^[a-z0-9.-]+$", bd):
-            raise HTTPException(400, "Niepoprawna domena")
-        s.base_domain = bd
+        s.base_domain = _clean_domain(body.base_domain)
+    if body.extra_domains is not None:
+        extra = []
+        for raw in body.extra_domains:
+            d = _clean_domain(raw)
+            if d and d != s.base_domain and d not in extra:
+                extra.append(d)
+        s.extra_domains = extra
+    if not s.base_domain and s.extra_domains:  # the first domain on the list becomes the default one
+        s.base_domain = s.extra_domains.pop(0)
     if body.default_server_id is not None:
         s.default_server_id = body.default_server_id or None
     if body.curseforge_api_key is not None and body.curseforge_api_key != "":
@@ -503,10 +520,20 @@ class CreateServer(BaseModel):
     mc_version: str
     loader_version: Optional[str] = None
     subdomain: Optional[str] = None
+    domain: Optional[str] = None  # one of the panel's main domains ("" / None = the default one)
     java: JavaConfig = JavaConfig()
     eula: bool = False
     worldgen: Optional[WorldgenSpec] = None
     settings: Optional[CreateSettings] = None
+
+
+def _set_domain(inst: ServerInstance, domain: str | None) -> None:
+    """Remember the main domain chosen when creating a server (ignored if it is not configured)."""
+    d = (domain or "").strip().lower().strip(".")
+    domains = manager.settings.domains()
+    if d and d in domains and d != domains[0]:
+        inst.cfg.domain = d
+        manager.save_server(inst.cfg)
 
 
 def _unique_subdomain(wanted: str | None, name: str) -> str:
@@ -536,6 +563,7 @@ async def create_server(body: CreateServer, _: str = Depends(auth.require_user))
     inst = manager.create(name=body.name, type=body.type, mc_version=body.mc_version,
                           loader_version=body.loader_version or None,
                           subdomain=_unique_subdomain(body.subdomain, body.name), java=body.java.model_dump())
+    _set_domain(inst, body.domain)
     if st:
         await asyncio.to_thread(_apply_create_settings, inst, st)
     if spec:
@@ -628,6 +656,7 @@ class CreateModpack(BaseModel):
     version_id: str
     name: str = Field(min_length=1, max_length=64)
     subdomain: Optional[str] = None
+    domain: Optional[str] = None  # one of the panel's main domains ("" / None = the default one)
     java: JavaConfig = JavaConfig()
     eula: bool = False
     icon_url: Optional[str] = None
@@ -646,6 +675,7 @@ async def create_from_modpack(body: CreateModpack, _: str = Depends(auth.require
     inst = manager.create(name=body.name, type="vanilla", mc_version="?", loader_version=None,
                           subdomain=_unique_subdomain(body.subdomain, body.name), java=body.java.model_dump(),
                           modpack=info.model_dump())
+    _set_domain(inst, body.domain)
 
     async def prepare(log):
         if body.source == "modrinth":
@@ -664,7 +694,7 @@ async def create_from_modpack(body: CreateModpack, _: str = Depends(auth.require
 @router.post("/servers/modpack/upload")
 @run_errors
 async def create_from_upload(
-    file: UploadFile = File(...), name: str = Form(...), subdomain: str = Form(""),
+    file: UploadFile = File(...), name: str = Form(...), subdomain: str = Form(""), domain: str = Form(""),
     max_ram_mb: int = Form(4096), eula: bool = Form(False), _: str = Depends(auth.require_user),
 ):
     if not eula:
@@ -679,6 +709,7 @@ async def create_from_upload(
     inst = manager.create(name=name, type="vanilla", mc_version="?", loader_version=None,
                           subdomain=_unique_subdomain(subdomain or None, name), java=java.model_dump(),
                           modpack=ModpackInfo(source="file", name=file.filename or name).model_dump())
+    _set_domain(inst, domain)
 
     async def prepare(log):
         return modpacks.plan_from_upload(dest, cf_key(), log)
@@ -706,6 +737,7 @@ class ConfigPatch(BaseModel):
     java: Optional[JavaConfig] = None
     backup: Optional[BackupSchedule] = None
     auth_enabled: Optional[bool] = None
+    domain: Optional[str] = Field(default=None, max_length=253)  # main domain shown in the address ("" = default)
     custom_jar: Optional[str] = Field(default=None, max_length=255)  # "Custom JAR" servers: file to start
 
 
@@ -717,6 +749,12 @@ async def patch_config(sid: str, body: ConfigPatch, _: str = Depends(auth.requir
     patch = body.model_dump(exclude_unset=True)
     if "restart_daily_at" in patch and not patch["restart_daily_at"]:
         patch["restart_daily_at"] = None
+    if "domain" in patch:
+        domain = (patch["domain"] or "").strip().lower().strip(".")
+        if domain and domain not in manager.settings.domains():
+            raise HTTPException(400, f"Domeny {domain} nie ma na liście domen głównych panelu")
+        # The default domain is stored as "none chosen", so it follows when the default changes.
+        patch["domain"] = domain if domain and domain != manager.settings.domains()[0] else None
     if "custom_jar" in patch:
         jar = patch.pop("custom_jar") or ""
         if inst.cfg.type != "custom":

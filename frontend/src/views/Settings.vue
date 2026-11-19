@@ -8,9 +8,17 @@
         <div class="card-body col" style="gap: 16px">
           <div class="grid grid-2">
             <div class="field">
-              <label>{{ $t('Domena bazowa') }}</label>
-              <input v-model="s.base_domain" class="input mono" :placeholder="$t('mc.example.com')" />
-              <span class="hint">{{ $t('Serwery będą dostępne jako') }} <span class="mono">{{ $t('subdomena') }}.{{ s.base_domain || 'mc.example.com' }}</span></span>
+              <label>{{ $t('Domeny główne') }}</label>
+              <div class="col" style="gap: 6px">
+                <div v-for="(d, i) in domainList" :key="i" class="input-group">
+                  <input v-model="domainList[i]" class="input mono" :placeholder="i === 0 ? $t('mc.example.com') : $t('np. mc.druga-domena.pl')" />
+                  <span v-if="i === 0" class="addon tiny">{{ $t('domyślna') }}</span>
+                  <button v-else class="btn addon-btn" :title="$t('Usuń domenę')" @click="domainList.splice(i, 1)"><Trash2 /></button>
+                </div>
+                <button type="button" class="btn sm ghost" style="align-self: flex-start" :disabled="domainList.length >= 50" @click="domainList.push('')"><Plus /> {{ $t('Dodaj domenę') }}</button>
+              </div>
+              <span class="hint">{{ $t('Każdy serwer działa pod') }} <span class="mono">{{ $t('subdomena') }}.{{ domainList[0] || 'mc.example.com' }}</span><template v-if="extraCount">
+                {{ $t('oraz pod {n} kolejnymi domenami. Pierwsza jest domyślna – w ustawieniach serwera możesz wybrać, którą pokazywać graczom.', { n: extraCount }) }}</template></span>
             </div>
             <div class="field">
               <label>{{ $t('Serwer domyślny') }}</label>
@@ -55,7 +63,7 @@
             <Info />
             <div>
               {{ $t('Proxy nasłuchuje na porcie') }} <b class="mono">{{ s.proxy_port }}</b> {{ $t('(TCP), a czat głosowy na') }} <b class="mono">{{ s.voice_port }}</b> {{ $t('(UDP). Dodaj w DNS rekord') }}
-              <span class="mono">*.{{ s.base_domain || 'mc.example.com' }} → A → {{ $t('IP serwera') }}</span>
+              <span v-for="(d, i) in (cleanDomains.length ? cleanDomains : ['mc.example.com'])" :key="d" class="mono">{{ i ? ', ' : '' }}*.{{ d }} → A → {{ $t('IP serwera') }}</span>
               {{ $t('(wildcard), aby każda subdomena trafiała do panelu. Proxy rozpoznaje serwer po nazwie hosta wpisanej przez gracza.') }}
             </div>
           </div>
@@ -223,7 +231,7 @@
   </div>
 </template>
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Network, Info, Save, KeyRound, Coffee, Users, Trash2, UserPlus, Plus, Loader2, MonitorSmartphone, RotateCcw, ScrollText, RefreshCw, Eraser, AlertTriangle, Activity, Send, FlaskConical } from 'lucide-vue-next'
 import MotdEditor from '../components/MotdEditor.vue'
 import Toggle from '../components/Toggle.vue'
@@ -239,6 +247,11 @@ import { formatBytes, formatDate, mcToHtml } from '../utils'
 const release = useFleet()
 onUnmounted(release)
 const s = ref(null)
+// Editable list of main domains: [base_domain, ...extra_domains]
+const domainList = ref([''])
+const cleanDomains = computed(() => [...new Set(domainList.value.map((d) => d.trim().toLowerCase().replace(/^\*\./, '').replace(/^\.+|\.+$/g, '')).filter(Boolean))])
+const extraCount = computed(() => Math.max(0, cleanDomains.value.length - 1))
+watch(s, (v) => { if (v) domainList.value = [v.base_domain || '', ...(v.extra_domains || [])] })
 const saving = ref(false)
 const cfKey = ref('')
 const runtimes = ref([])
@@ -411,7 +424,7 @@ onUnmounted(() => clearInterval(geyserTimer))
 async function save() {
   saving.value = true
   try {
-    s.value = await api.put('/settings', { base_domain: s.value.base_domain, default_server_id: s.value.default_server_id || '', public_address: s.value.public_address, public_panel_url: s.value.public_panel_url || '', pack_subdomain: s.value.pack_subdomain || 'packs', bedrock_advertise: s.value.bedrock_advertise || '' })
+    s.value = await api.put('/settings', { base_domain: cleanDomains.value[0] || '', extra_domains: cleanDomains.value.slice(1), default_server_id: s.value.default_server_id || '', public_address: s.value.public_address, public_panel_url: s.value.public_panel_url || '', pack_subdomain: s.value.pack_subdomain || 'packs', bedrock_advertise: s.value.bedrock_advertise || '' })
     toast('Zapisano ustawienia', 'success')
   } catch (e) { toastError(e) } finally { saving.value = false }
 }
@@ -463,4 +476,6 @@ async function removeUser(u) {
 .seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
 .seg button { height: 26px; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .seg button.active { background: var(--surface-3); color: var(--text); }
+.addon-btn { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; height: auto; }
+.addon-btn svg { width: 15px; height: 15px; }
 </style>

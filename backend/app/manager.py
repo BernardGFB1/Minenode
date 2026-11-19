@@ -215,15 +215,37 @@ class ServerInstance:
     def online_mode(self) -> bool:
         return self.props().get("online-mode", "true").lower() == "true"
 
+    def main_domain(self) -> str | None:
+        """The main domain this server shows: its own choice if the panel still has it, else the first one."""
+        domains = self.m.settings.domains()
+        chosen = (getattr(self.cfg, "domain", None) or "").strip().lower()
+        if chosen in domains:
+            return chosen
+        return domains[0] if domains else None
+
+    def domain_hosts(self) -> list[str]:
+        """<subdomain>.<domain> for every main domain, the one this server shows first."""
+        main = self.main_domain()
+        domains = self.m.settings.domains()
+        ordered = ([main] if main else []) + [d for d in domains if d != main]
+        return [f"{self.cfg.subdomain}.{d}" for d in ordered]
+
     def address(self) -> str:
         s = self.m.settings
         port = "" if PROXY_PORT == 25565 else f":{PROXY_PORT}"
         if self.cfg.aliases:
             return self.cfg.aliases[0] + port
-        if s.base_domain:
-            return f"{self.cfg.subdomain}.{s.base_domain}{port}"
+        domain = self.main_domain()
+        if domain:
+            return f"{self.cfg.subdomain}.{domain}{port}"
         host = s.public_address or "twoja-domena"
         return f"{self.cfg.subdomain}.{host}{port}"
+
+    def addresses(self) -> list[str]:
+        """Every address players can use for this server (aliases, then each main domain)."""
+        port = "" if PROXY_PORT == 25565 else f":{PROXY_PORT}"
+        out = [a + port for a in self.cfg.aliases] + [h + port for h in self.domain_hosts()]
+        return out or [self.address()]
 
     # ------------------------------------------------------------ pub/sub
     def subscribe(self) -> asyncio.Queue:
@@ -285,6 +307,8 @@ class ServerInstance:
             "subdomain": self.cfg.subdomain,
             "aliases": self.cfg.aliases,
             "address": self.address(),
+            "addresses": self.addresses(),
+            "domain": self.main_domain(),
             "state": self.state,
             "installed": self.cfg.installed,
             "players_online": len(self.online),
@@ -1005,10 +1029,7 @@ class Manager:
         self.save_server(cfg)
         inst = ServerInstance(self, cfg)
         self.instances[sid] = inst
-        if not self.settings.default_server_id:
-            s = self.settings
-            s.default_server_id = sid
-            self.save_settings(s)
+        # The default server (for bare IPs and unknown hostnames) is only ever chosen by the owner.
         return inst
 
     async def delete(self, sid: str, delete_backups: bool = True) -> None:
@@ -1027,8 +1048,8 @@ class Manager:
         if delete_backups and self.backups:
             await asyncio.to_thread(self.backups.delete_all, sid)
         s = self.settings
-        if s.default_server_id == sid:
-            s.default_server_id = next(iter(self.instances), None)
+        if s.default_server_id == sid:  # no other server is picked automatically
+            s.default_server_id = None
             self.save_settings(s)
 
     # ------------------------------------------------------------ routing
@@ -1037,15 +1058,15 @@ class Manager:
         if ":" in host and not host.startswith("["):
             host = host.split(":", 1)[0]
         s = self.settings
-        base = s.base_domain.strip().lower().strip(".")
         for inst in self.instances.values():
             if host in inst.cfg.aliases:
                 return inst
         sub = None
-        if base and host.endswith("." + base):
-            sub = host[: -len(base) - 1]
-        elif base and host == base:
-            sub = None
+        # The longest matching main domain wins (mc.example.com before example.com).
+        domains = sorted(s.domains(), key=len, reverse=True)
+        root = next((d for d in domains if host == d or host.endswith("." + d)), None)
+        if root:
+            sub = host[: -len(root) - 1] if host != root else None
         elif "." in host and not re.match(r"^[\d.]+$", host):
             sub = host.split(".", 1)[0]
         if sub:

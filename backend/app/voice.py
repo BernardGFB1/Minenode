@@ -47,8 +47,9 @@ def public_host(inst: "ServerInstance") -> str | None:
     s = inst.m.settings
     if inst.cfg.aliases:
         return inst.cfg.aliases[0]
-    if s.base_domain:
-        return f"{inst.cfg.subdomain}.{s.base_domain}"
+    domain = inst.main_domain() if hasattr(inst, "main_domain") else (s.base_domain or None)
+    if domain:
+        return f"{inst.cfg.subdomain}.{domain}"
     return s.public_address or None
 
 

@@ -159,10 +159,6 @@ def import_pack(path: Path, manager: "Manager", name: str | None = None,
             inst = ServerInstance(manager, cfg)
             manager.instances[new_id] = inst
             manager.save_server(cfg)
-            if not manager.settings.default_server_id:
-                settings = manager.settings
-                settings.default_server_id = new_id
-                manager.save_settings(settings)
             panel_players = next((i for i in infos if i.filename == "panel/players.json"), None)
             if panel_players:
                 (PANEL_DIR / "players").mkdir(parents=True, exist_ok=True)

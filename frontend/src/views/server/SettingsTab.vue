@@ -7,7 +7,8 @@
           <div class="field"><label>{{ $t('Nazwa') }}</label><input v-model="c.name" class="input" maxlength="64" /></div>
           <div class="field">
             <label>{{ $t('Subdomena') }}</label>
-            <div class="input-group"><input v-model="c.subdomain" class="input mono" /><span class="addon">.{{ settings?.base_domain || 'domena' }}</span></div>
+            <div class="input-group"><input v-model="c.subdomain" class="input mono" /><DomainAddon v-model="c.domain" :settings="settings" /></div>
+            <span v-if="otherAddresses.length" class="hint">{{ $t('Działa też pod:') }} <span class="mono">{{ otherAddresses.join(', ') }}</span></span>
           </div>
         </div>
         <div class="field">
@@ -79,9 +80,10 @@
   </div>
 </template>
 <script setup>
-import { inject, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Tag, RefreshCcw, Network, Blocks, Save, Wrench, Download, AlertOctagon, AlertTriangle, Trash2 } from 'lucide-vue-next'
+import DomainAddon from '../../components/DomainAddon.vue'
 import Toggle from '../../components/Toggle.vue'
 import VersionPicker from '../../components/VersionPicker.vue'
 import { api, download } from '../../api'
@@ -96,6 +98,12 @@ const id = live.summary.id
 const c = ref(null)
 const aliases = ref('')
 const settings = ref(null)
+// Other main domains the server also answers on (the shown one is picked next to the subdomain).
+const otherAddresses = computed(() => {
+  const domains = settings.value?.domains || []
+  const shown = c.value?.domain && domains.includes(c.value.domain) ? c.value.domain : domains[0]
+  return domains.filter((d) => d !== shown).map((d) => `${c.value.subdomain}.${d}`)
+})
 const saving = ref(false)
 const exporting = ref(false)
 const re = reactive({ type: live.summary.type, mc_version: live.summary.mc_version, loader_version: null })
@@ -113,7 +121,7 @@ async function save() {
   saving.value = true
   try {
     const body = {
-      name: c.value.name, subdomain: c.value.subdomain, aliases: aliases.value.split(',').map((a) => a.trim()).filter(Boolean),
+      name: c.value.name, subdomain: c.value.subdomain, domain: c.value.domain || '', aliases: aliases.value.split(',').map((a) => a.trim()).filter(Boolean),
       auto_start: c.value.auto_start, auto_restart: c.value.auto_restart, start_on_join: c.value.start_on_join,
       proxy_protocol: c.value.proxy_protocol, restart_daily_at: c.value.restart_daily_at || null,
       idle_shutdown_minutes: c.value.idle_shutdown_minutes || 0,

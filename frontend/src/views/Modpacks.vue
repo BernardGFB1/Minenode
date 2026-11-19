@@ -210,7 +210,7 @@ async function installSelected() {
     const f = installForm.value
     const s = await api.post('/servers/modpack', {
       source: selected.value.source, project_id: selected.value.id, version_id: versionId.value,
-      name: f.name, subdomain: f.subdomain || null, eula: f.eula, java: javaOf(f), icon_url: selected.value.icon,
+      name: f.name, subdomain: f.subdomain || null, domain: f.domain || null, eula: f.eula, java: javaOf(f), icon_url: selected.value.icon,
     })
     toast(t('Instalowanie modpacka „{name}”…', { name: s.name }), 'success')
     refreshFleet()
@@ -236,6 +236,7 @@ async function installFile() {
     fd.append('file', file.value)
     fd.append('name', f.name)
     fd.append('subdomain', f.subdomain || '')
+    fd.append('domain', f.domain || '')
     fd.append('max_ram_mb', f.max_ram_mb)
     fd.append('eula', f.eula ? 'true' : 'false')
     const s = await uploadWithProgress('/servers/modpack/upload', fd, (p) => (uploadProgress.value = p))

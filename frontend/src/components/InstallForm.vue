@@ -9,7 +9,7 @@
         <label>{{ $t('Subdomena') }}</label>
         <div class="input-group">
           <input :value="modelValue.subdomain" class="input mono" :placeholder="slugify(modelValue.name) || 'modpack'" @input="set('subdomain', $event.target.value)" />
-          <span class="addon">.{{ settings?.base_domain || $t('twoja-domena') }}</span>
+          <DomainAddon :model-value="modelValue.domain" :settings="settings" @update:model-value="set('domain', $event)" />
         </div>
       </div>
     </div>
@@ -26,6 +26,7 @@
 </template>
 <script setup>
 import RamPicker from './RamPicker.vue'
+import DomainAddon from './DomainAddon.vue'
 import { slugify } from '../utils'
 const props = defineProps({ modelValue: Object, settings: Object, sys: Object })
 const emit = defineEmits(['update:modelValue'])

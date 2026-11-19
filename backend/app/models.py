@@ -112,6 +112,7 @@ class ServerConfig(BaseModel):
     proxy_protocol: bool = False
     restart_daily_at: Optional[str] = None  # "HH:MM"
     idle_shutdown_minutes: int = Field(default=0, ge=0, le=24 * 60)  # 0 = disabled
+    domain: Optional[str] = None  # main domain shown in this server's address (None = the panel's first domain)
     voice_enabled: bool = False  # Simple Voice Chat routed through the shared UDP proxy
     voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
@@ -171,7 +172,8 @@ class ServerConfig(BaseModel):
 
 
 class PanelSettings(BaseModel):
-    base_domain: str = ""
+    base_domain: str = ""  # the first (default) main domain
+    extra_domains: list[str] = []  # more main domains: every server answers as <subdomain>.<each domain>
     default_server_id: Optional[str] = None
     curseforge_api_key: str = ""
     public_address: str = ""  # shown to users when no base domain is configured
@@ -196,6 +198,15 @@ class PanelSettings(BaseModel):
     kick_starting: str = "{name} uruchamia się – spróbuj ponownie za chwilę."
     backup_destinations: list[BackupDestination] = []
     kick_waking: str = "{name} właśnie się uruchamia!\nDołącz ponownie za około minutę."
+
+    def domains(self) -> list[str]:
+        """Every main domain, the default one first (normalised, without duplicates)."""
+        out: list[str] = []
+        for d in [self.base_domain, *self.extra_domains]:
+            d = (d or "").strip().lower().strip(".")
+            if d and d not in out:
+                out.append(d)
+        return out
 
 
 class User(BaseModel):

@@ -92,8 +92,9 @@ services:
 1. In **Panel settings**, set the *base domain*, e.g. `mc.example.com`.
 2. Add a wildcard DNS record: `*.mc.example.com  A  <server IP>` (optionally also `mc.example.com`).
 3. Each server gets its own subdomain (e.g. `survival`), so players join `survival.mc.example.com`.
+4. Optional: add more *main domains* (**Add domain**), e.g. `play.second-domain.net`, each with its own wildcard record. Every server then answers on all of them (`survival.mc.example.com`, `survival.play.second-domain.net`, …) for Java and Bedrock. The first domain is the default; in a server's settings (and when creating it) you pick which domain its address shows on the server card, the public page and in Simple Voice Chat. Removing a domain moves servers that showed it back to the default one. When domains overlap (`example.com` and `mc.example.com`), the longer one decides.
 
-Connections by IP or to an unknown name go to the *default server* (set in the panel). You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings. Bedrock players use the same hostnames on port `19132` (see [Bedrock Edition](#bedrock-edition-geyser)). Like on Java, unknown Bedrock addresses go to the default server (if it has Bedrock enabled), otherwise they are rejected.
+Connections by IP or to an unknown name go to the *default server* (set in the panel). MineNode never picks one by itself – not for the first server, nor when the default server is deleted – so until you choose one, such connections are rejected. You can also attach any full domain, such as `play.myserver.net`, as an *alias* in the server settings. Bedrock players use the same hostnames on port `19132` (see [Bedrock Edition](#bedrock-edition-geyser)). Like on Java, unknown Bedrock addresses go to the default server (if it has Bedrock enabled), otherwise they are rejected.
 
 ### Resource packs
 

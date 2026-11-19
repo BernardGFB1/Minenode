@@ -58,6 +58,20 @@ LOG_BUFFER = 800
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
+
+def _domains(settings) -> list[str]:
+    """Main domains of the panel (the default one first); test doubles may only have ``base_domain``."""
+    if hasattr(settings, "domains"):
+        return [normalize_host(d) for d in settings.domains()]
+    base = normalize_host(getattr(settings, "base_domain", ""))
+    return [base] if base else []
+
+
+def _domain_hosts(inst, domains: list[str]) -> list[str]:
+    chosen = normalize_host(getattr(inst.cfg, "domain", None) or "")
+    ordered = ([chosen] if chosen in domains else []) + [d for d in domains if d != chosen]
+    return [f"{inst.cfg.subdomain}.{d}" for d in ordered]
+
 def normalize_host(raw: str | None) -> str:
     """Return a bare, lowercase hostname (Bedrock clients sometimes include a port or scheme)."""
     host = (raw or "").strip().lower()
@@ -246,8 +260,9 @@ class BedrockProxy:
     def route_map(self) -> dict[str, "ServerInstance"]:
         """Build the hostname -> server map, mirroring the Java proxy's precedence.
 
-        Aliases win, then ``subdomain.base_domain`` (or ``subdomain.public_address`` when no base
-        domain is configured), then the bare base domain / public address for the default server.
+        Aliases win, then ``subdomain.<main domain>`` for every main domain of the panel (the one the
+        server shows first; ``subdomain.public_address`` when no domain is configured), then the bare
+        main domains / public address for the default server.
 
         Disabled servers still reserve their hostnames: a host that belongs to a server with
         Bedrock disabled is rejected instead of being silently reassigned to another server.
@@ -257,7 +272,8 @@ class BedrockProxy:
             return {}
 
         settings = self.m.settings
-        base = normalize_host(settings.base_domain)
+        domains = _domains(settings)
+        base = domains[0] if domains else ""
         public = normalize_host(settings.public_address)
         pairs: list[tuple[str, "ServerInstance"]] = []
 
@@ -270,16 +286,17 @@ class BedrockProxy:
         for inst in instances:
             for alias in inst.cfg.aliases:
                 add(alias, inst)
-        if base:
+        if domains:
             for inst in instances:
-                add(f"{inst.cfg.subdomain}.{base}", inst)
+                for host in _domain_hosts(inst, domains):  # the domain the server shows comes first
+                    add(host, inst)
         elif public and not _is_ip(public):
             for inst in instances:
                 add(f"{inst.cfg.subdomain}.{public}", inst)
 
         default = self._default_server()
         if default is not None:
-            for root in (base, public):
+            for root in (*domains, public):
                 if root:
                     add(root, default)
 
@@ -332,7 +349,7 @@ class BedrockProxy:
         if hosts:
             return hosts, "hostname"
         # e.g. only a bare base domain or an alias resolves
-        roots = {normalize_host(s.base_domain), public}
+        roots = {*_domains(s), public}
         for host in sorted(self.route_map(), key=lambda h: (h in roots, h)):
             if not _is_ip(host) and _resolves(host):
                 return [host], "hostname"
@@ -373,15 +390,15 @@ class BedrockProxy:
     def reserved_hosts(self) -> set[str]:
         """Every hostname any server owns (aliases and subdomains), Bedrock-enabled or not."""
         s = self.m.settings
-        base, public = normalize_host(s.base_domain), normalize_host(s.public_address)
-        root = base or (public if public and not _is_ip(public) else "")
+        domains, public = _domains(s), normalize_host(s.public_address)
+        roots = domains or ([public] if public and not _is_ip(public) else [])
         out: set[str] = set()
         for inst in self.m.instances.values():
             for alias in inst.cfg.aliases:
                 h = normalize_host(alias)
                 if valid_host(h):
                     out.add(h)
-            if root:
+            for root in roots:
                 h = normalize_host(f"{inst.cfg.subdomain}.{root}")
                 if valid_host(h):
                     out.add(h)
