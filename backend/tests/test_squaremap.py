@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 from app import squaremap
+from app.models import WebMapSettings
 
 
 def _paper(tmp_path):
@@ -276,7 +277,8 @@ def test_public_stats_separates_online_and_offline(tmp_path, monkeypatch):
 
     inst = SimpleNamespace(
         cfg=SimpleNamespace(id="srv1", name="Survival", subdomain="survival", type="paper",
-                            mc_version="1.21.4", loader_version="1.21.4", squaremap_enabled=True),
+                            mc_version="1.21.4", loader_version="1.21.4", squaremap_enabled=True,
+                            webmap=WebMapSettings(enabled=True)),
         dir=tmp_path, state="online", running=True, started_at=1000.0,
         online={"Steve": 200.0}, players_store=Store(),
         props=lambda: {"max-players": "30", "motd": "Hello"}, address=lambda: "play.example.com",
@@ -297,79 +299,3 @@ def test_public_stats_separates_online_and_offline(tmp_path, monkeypatch):
     assert stats["server"]["icon"] is None  # no server-icon.png: the page shows the engine letter
     (tmp_path / "server-icon.png").write_bytes(b"png")
     assert _public_stats(inst)["server"]["icon"] == "/api/public/server-icon/srv1?v=7"
-
-
-# ---------------------------------------------------------------- full render while nobody plays
-
-def _idle_inst(tmp_path):
-    sent, logs = [], []
-
-    async def send_command(cmd, echo=True):
-        sent.append(cmd)
-
-    inst = SimpleNamespace(
-        cfg=SimpleNamespace(type="paper", mc_version="1.21.4", squaremap_enabled=True, squaremap_idle_render=True,
-                            id="srv1", subdomain="survival", name="Survival"),
-        dir=tmp_path, state="online", online={}, empty_since=1000.0, running=True,
-        send_command=send_command, panel_log=logs.append,
-        spawn=lambda coro: asyncio.run(coro))
-    return inst, sent, logs
-
-
-def test_idle_render_waits_for_an_empty_server_then_renders_world_by_world(tmp_path, monkeypatch):
-    monkeypatch.setattr(squaremap, "is_installed", lambda inst: True)
-    inst, sent, _ = _idle_inst(tmp_path)
-    r = squaremap.IdleRender(inst)
-    r.tick(1000 + squaremap.IDLE_RENDER_DELAY - 1)
-    assert sent == []  # empty, but not for long enough yet
-    r.tick(1000 + squaremap.IDLE_RENDER_DELAY)
-    assert sent == ["squaremap fullrender minecraft:overworld"]
-    r.tick(1000 + squaremap.IDLE_RENDER_DELAY + 30)
-    assert len(sent) == 1  # waiting for squaremap to confirm
-    r.on_line("[12:00:00 INFO]: [squaremap] Started full map render for minecraft:overworld")
-    r.on_line("[12:30:00 INFO]: [squaremap] Finished rendering map for minecraft:overworld")
-    assert "minecraft:overworld" not in r.pending
-    r.tick(5000)
-    assert sent[-1] == "squaremap fullrender minecraft:the_nether"
-    # the pending list survives a panel restart
-    assert squaremap.IdleRender(inst).pending == ["minecraft:the_nether", "minecraft:the_end"]
-
-
-def test_idle_render_pauses_for_players_and_resumes_when_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(squaremap, "is_installed", lambda inst: True)
-    inst, sent, _ = _idle_inst(tmp_path)
-    r = squaremap.IdleRender(inst)
-    r.on_line("[squaremap] Rendering map for minecraft:overworld has been resumed")  # checkpoint after restart
-    inst.online = {"Steve": 1.0}
-    inst.empty_since = None
-    r.on_players(1)
-    assert sent == ["squaremap pauserender minecraft:overworld"] and r.paused
-    r.on_line("[squaremap] Paused renders for minecraft:overworld")
-    r.tick(9999)
-    assert len(sent) == 1  # still somebody online
-    inst.online, inst.empty_since = {}, 10_000.0
-    r.tick(10_000 + squaremap.IDLE_RENDER_DELAY)
-    assert sent[-1] == "squaremap pauserender minecraft:overworld" and not r.paused
-
-
-def test_idle_render_skips_dimensions_squaremap_does_not_know(tmp_path, monkeypatch):
-    monkeypatch.setattr(squaremap, "is_installed", lambda inst: True)
-    inst, sent, _ = _idle_inst(tmp_path)
-    r = squaremap.IdleRender(inst)
-    r.pending = ["minecraft:the_nether", "minecraft:overworld"]
-    r.tick(2000)
-    r.tick(2000 + squaremap.START_TIMEOUT + 1)  # no "Started …" line: the nether is disabled
-    assert sent == ["squaremap fullrender minecraft:the_nether", "squaremap fullrender minecraft:overworld"]
-
-
-def test_idle_render_respects_the_settings_and_custom_command_label(tmp_path, monkeypatch):
-    monkeypatch.setattr(squaremap, "is_installed", lambda inst: True)
-    inst, sent, _ = _idle_inst(tmp_path)
-    inst.cfg.squaremap_idle_render = False
-    squaremap.IdleRender(inst).tick(99_999)
-    assert sent == []
-    inst.cfg.squaremap_idle_render = True
-    (tmp_path / "plugins" / "squaremap").mkdir(parents=True)
-    (tmp_path / "plugins" / "squaremap" / "config.yml").write_text("settings:\n  commands:\n    main-command-label: livemap\n")
-    squaremap.IdleRender(inst).tick(99_999)
-    assert sent == ["livemap fullrender minecraft:overworld"]

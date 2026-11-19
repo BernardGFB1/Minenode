@@ -24,7 +24,7 @@ from starlette.websockets import WebSocketDisconnect
 from . import storage as storage_mod
 from . import bedrock_compat, datapacks as dpacks, packs, worldgen
 from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
-from . import chunky, squaremap
+from . import chunky, lod, squaremap, webmap
 from .models import ChunkySettings
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
@@ -1877,7 +1877,7 @@ def _public_stats(inst: ServerInstance) -> dict:
         for key, entry in known.items() if key not in online_keys
     ]
     offline.sort(key=lambda p: p["last_seen"], reverse=True)
-    map_ready = squaremap.map_available(inst)
+    map_ready = webmap.map_available(inst)
     return {
         "server": {
             "id": inst.cfg.id, "name": inst.cfg.name, "subdomain": inst.cfg.subdomain,
@@ -1896,12 +1896,23 @@ def _public_stats(inst: ServerInstance) -> dict:
         "chat": list(getattr(inst, "chat", [])),
         "players": {"online": len(online), "offline": len(offline), "known": len(online) + len(offline),
                     "max": _public_max_players(inst)},
+        "lod": _public_lod(inst),
         "map": {
-            "enabled": inst.cfg.squaremap_enabled,
+            "enabled": inst.cfg.webmap.enabled,
+            "provider": inst.cfg.webmap.provider,
+            "title": webmap.INFO[inst.cfg.webmap.provider]["title"],
+            "needs_running": webmap.INFO[inst.cfg.webmap.provider]["proxy"],
             "available": map_ready,
-            "url": squaremap.map_url(inst) if map_ready else None,
+            "url": webmap.map_url(inst) if map_ready else None,
         },
     }
+
+
+def _public_lod(inst: ServerInstance) -> dict:
+    """Which distant-terrain mods players can use here (only what the server really offers)."""
+    cfg = getattr(inst.cfg, "lod", None)
+    mods = [key for key in ("distant_horizons", "voxy") if cfg and getattr(cfg, key) and lod.supported(inst, key)]
+    return {"mods": mods}
 
 
 @public_router.get("/api/public/servers/{key}/stats")
@@ -1920,13 +1931,20 @@ async def public_server_icon(sid: str):
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
+_PROXY_HEADERS = ("content-type", "content-encoding", "cache-control", "etag", "last-modified", "expires")
+
+
 @public_router.get("/map/{sid}/{path:path}", include_in_schema=False)
-async def squaremap_public_map(sid: str, path: str):
-    """Serve squaremap's generated web directory. The embedded squaremap HTTP server stays disabled."""
+async def webmap_public(sid: str, path: str, request: Request):
+    """The live web map. squaremap's generated web directory is served from disk; Dynmap and BlueMap run
+    their own web servers on a loopback port and are proxied here (GET only – no web chat or logins)."""
     inst = manager.instances.get(sid)
-    if not inst or not inst.cfg.squaremap_enabled:
+    if not inst or not inst.cfg.webmap.enabled:
         raise HTTPException(404)
-    root = squaremap.web_dir(inst).resolve()
+    port = webmap.proxy_port(inst)
+    if port:
+        return await _proxy_map(inst, port, path, request)
+    root = webmap.web_dir(inst).resolve()
     rel = path or "index.html"
     if rel.endswith("/"):
         rel += "index.html"
@@ -1940,6 +1958,36 @@ async def squaremap_public_map(sid: str, path: str):
         # Tile changes and the JSON documents that describe them are polled live by the map.
         headers["Cache-Control"] = "no-cache"
     return FileResponse(target, headers=headers)
+
+
+async def _proxy_map(inst: ServerInstance, port: int, path: str, request: Request):
+    import httpx
+    if not inst.running:
+        return JSONResponse({"detail": "Mapa jest dostępna, gdy serwer działa."}, status_code=503,
+                            headers={"Cache-Control": "no-store"})
+    if ".." in path.split("/"):
+        raise HTTPException(404)
+    url = f"http://127.0.0.1:{port}/{path}"
+    fwd = {k: v for k, v in request.headers.items()
+           if k.lower() in ("accept", "accept-encoding", "if-none-match", "if-modified-since", "range")}
+    client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=3.0))
+    try:
+        req = client.build_request("GET", url, params=request.query_params, headers=fwd)
+        upstream = await client.send(req, stream=True)
+    except httpx.HTTPError:
+        await client.aclose()
+        return JSONResponse({"detail": "Mapa jeszcze się uruchamia – spróbuj za chwilę."}, status_code=503,
+                            headers={"Cache-Control": "no-store"})
+    headers = {k: v for k, v in upstream.headers.items() if k.lower() in _PROXY_HEADERS}
+    headers["X-Frame-Options"] = "SAMEORIGIN"
+
+    async def close():
+        await upstream.aclose()
+        await client.aclose()
+
+    # Raw bytes: BlueMap serves pre-compressed tiles with Content-Encoding, which must reach the browser as is.
+    return StreamingResponse(upstream.aiter_raw(), status_code=upstream.status_code, headers=headers,
+                             background=BackgroundTask(close))
 
 
 # ====================================================================== Simple Voice Chat
@@ -1999,49 +2047,122 @@ async def voice_install(sid: str, _: str = Depends(auth.require_user)):
     return {**_voice_state(inst), "installed_files": ins.installed, "restart_required": inst.running}
 
 
-# ====================================================================== squaremap
+# ====================================================================== web map (squaremap / Dynmap / BlueMap)
 
-@router.get("/servers/{sid}/squaremap")
-async def squaremap_get(sid: str, _: str = Depends(auth.require_user)):
-    return await squaremap.state(inst_or_404(sid))
-
-
-class SquaremapBody(BaseModel):
-    enabled: bool
-    idle_render: Optional[bool] = None  # full renders while nobody plays
+@router.get("/servers/{sid}/webmap")
+async def webmap_get(sid: str, refresh: bool = False, _: str = Depends(auth.require_user)):
+    return await webmap.state(inst_or_404(sid), refresh=refresh)
 
 
-@router.post("/servers/{sid}/squaremap")
+class WebMapBody(BaseModel):
+    enabled: Optional[bool] = None
+    provider: Optional[Literal["squaremap", "dynmap", "bluemap"]] = None
+    show_players: Optional[bool] = None
+    render_3d: Optional[bool] = None
+    update: bool = False  # install the newest build now
+
+
+@router.post("/servers/{sid}/webmap")
 @run_errors
-async def squaremap_set(sid: str, body: SquaremapBody, _: str = Depends(auth.require_user)):
+async def webmap_set(sid: str, body: WebMapBody, _: str = Depends(auth.require_user)):
     inst = inst_or_404(sid)
-    if body.idle_render is not None and body.idle_render != inst.cfg.squaremap_idle_render:
-        inst.cfg.squaremap_idle_render = body.idle_render
-        manager.save_server(inst.cfg)
-        if body.enabled == inst.cfg.squaremap_enabled:  # only the render option changed
-            return {**await squaremap.state(inst), "restart_required": False}
-    if body.enabled:
-        if not squaremap.engine_supported(inst):
-            raise HTTPException(400, "squaremap wymaga silnika obsługującego pluginy lub mody")
-        was_enabled = inst.cfg.squaremap_enabled
-        inst.cfg.squaremap_enabled = True
-        try:
-            result = await squaremap.ensure(inst, refresh=True)
-        except Exception:
-            inst.cfg.squaremap_enabled = was_enabled
-            raise
-        manager.save_server(inst.cfg)
-        version = (result or {}).get("version") or "?"
-        inst.panel_log(f"squaremap {version} gotowy – mapa: {squaremap.public_url(inst)}")
-        state = await squaremap.state(inst)
-        return {**state, "restart_required": inst.running,
-                "installed_files": (result or {}).get("installed_files", []),
-                "updated": bool((result or {}).get("updated"))}
-    inst.cfg.squaremap_enabled = False
-    await asyncio.to_thread(squaremap.disable_jar, inst)
+    wm = inst.cfg.webmap
+    before = wm.model_copy()
+    if body.provider is not None:
+        wm.provider = body.provider
+    if body.show_players is not None:
+        wm.show_players = body.show_players
+    if body.render_3d is not None:
+        wm.render_3d = body.render_3d
+    if body.enabled is not None:
+        wm.enabled = body.enabled
+    if wm.enabled and not webmap.engine_supported(inst, wm.provider):
+        inst.cfg.webmap = before
+        raise HTTPException(400, webmap.unsupported_reason(inst, wm.provider) or "Ta mapa nie działa na tym silniku")
+    if wm.provider != before.provider and inst._map_render is not None and inst.map_render.running:
+        inst.cfg.webmap = before
+        raise HTTPException(400, "Poczekaj, aż skończy się renderowanie mapy, albo je przerwij")
+    result = None
+    try:
+        if wm.enabled and webmap.INFO[wm.provider]["proxy"]:
+            manager.ensure_map_port(inst)
+        if wm.enabled:
+            result = await webmap.prepare(inst, refresh=body.update or wm.provider != before.provider or not before.enabled)
+        else:
+            await webmap.disable(inst)
+    except Exception:
+        inst.cfg.webmap = before
+        raise
     manager.save_server(inst.cfg)
-    inst.panel_log("squaremap wyłączony.")
-    return {**await squaremap.state(inst), "restart_required": inst.running}
+    title = webmap.INFO[wm.provider]["title"]
+    if wm.enabled and (not before.enabled or wm.provider != before.provider):
+        inst.panel_log(f"Mapa {title} {(result or {}).get('version') or ''} gotowa – {squaremap.public_url(inst)}")
+    elif before.enabled and not wm.enabled:
+        inst.panel_log("Mapa wyłączona.")
+    # Jars change only when the map is switched on/off or replaced; options are re-read on restart.
+    changed = wm.model_dump(exclude={"port"}) != before.model_dump(exclude={"port"}) or bool((result or {}).get("updated"))
+    state = await webmap.state(inst)
+    return {**state, "restart_required": bool(changed and inst.running),
+            "installed_files": (result or {}).get("installed_files", []), "updated": bool((result or {}).get("updated"))}
+
+
+class WebMapRenderBody(BaseModel):
+    action: Literal["start", "cancel"] = "start"
+
+
+@router.post("/servers/{sid}/webmap/render")
+@run_errors
+async def webmap_render(sid: str, body: WebMapRenderBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    if body.action == "cancel":
+        inst.map_render.cancel()
+    else:
+        inst.map_render.start()
+    await asyncio.sleep(0.3)  # let the map answer the first command
+    return await webmap.state(inst)
+
+
+# ====================================================================== LOD for Distant Horizons / Voxy
+
+@router.get("/servers/{sid}/lod")
+async def lod_get(sid: str, refresh: bool = False, _: str = Depends(auth.require_user)):
+    return await lod.state(inst_or_404(sid), refresh=refresh)
+
+
+class LodBody(BaseModel):
+    distant_horizons: Optional[bool] = None
+    voxy: Optional[bool] = None
+    distance: Optional[int] = Field(default=None, ge=32, le=512)
+    generate: Optional[bool] = None
+    update: bool = False
+
+
+@router.post("/servers/{sid}/lod")
+@run_errors
+async def lod_set(sid: str, body: LodBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    before = inst.cfg.lod.model_copy()
+    patch = body.model_dump(exclude_unset=True, exclude={"update"})
+    for key in ("distant_horizons", "voxy"):
+        if patch.get(key) and not lod.supported(inst, key):
+            raise HTTPException(400, lod.unsupported_reason(inst, key) or "Ten silnik nie jest obsługiwany")
+    inst.cfg.lod = before.model_copy(update=patch)
+    try:
+        results = await lod.prepare(inst, refresh=body.update)
+    except Exception:
+        inst.cfg.lod = before
+        raise
+    manager.save_server(inst.cfg)
+    for key, r in results.items():
+        title = lod.jars(inst)[key].title
+        if not getattr(before, key):
+            inst.panel_log(f"{title} {r.get('version') or ''} włączony – gracze z tym modem zobaczą daleki teren.")
+    for key in ("distant_horizons", "voxy"):
+        if getattr(before, key) and not getattr(inst.cfg.lod, key):
+            inst.panel_log(f"{lod.jars(inst)[key].title} wyłączony.")
+    changed = inst.cfg.lod != before or any(r.get("updated") for r in results.values())
+    files = [f for r in results.values() for f in r.get("installed_files", [])]
+    return {**await lod.state(inst), "restart_required": bool(changed and inst.running), "installed_files": files}
 
 
 # ====================================================================== Chunky (world pre-generation)

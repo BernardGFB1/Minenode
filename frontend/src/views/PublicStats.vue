@@ -92,13 +92,24 @@
                   <button class="addr mono" :title="$t('Kopiuj adres')" @click="copyAddress"><Globe /> {{ $addr(s.address) }} <Copy /></button>
                 </li>
               </ol>
+              <div v-if="lodMods.length" class="lod">
+                <div class="lod-head"><Mountain /> <b>{{ $t('Daleki teren (LOD)') }}</b></div>
+                <div class="tiny muted">{{ $t('Serwer wysyła uproszczony teren daleko poza zasięg widzenia. Zainstaluj jeden z modów w wersji dla Minecrafta {v}, a od razu zobaczysz odległe góry i wybrzeża.', { v: s.mc_version }) }}</div>
+                <div v-for="m in lodMods" :key="m.id" class="lod-row">
+                  <span class="lod-name">{{ m.name }}</span>
+                  <span class="lod-links">
+                    <a v-for="l in m.links" :key="l.url" :href="l.url" target="_blank" rel="noopener" class="lod-link">{{ l.name }}<ExternalLink /></a>
+                  </span>
+                </div>
+                <div v-if="lodMods.some((m) => m.id === 'voxy')" class="tiny muted">{{ $t('Zamiast LOD Server Support może być Voxy Server Side – to ten sam mod.') }}</div>
+              </div>
             </div>
           </section>
         </div>
 
         <section class="card chat-card">
           <div class="card-head">
-            <h3><MessageSquare /> {{ $t('Czat graczy') }}</h3>
+            <h3>{{ $t('Czat graczy') }}</h3>
             <span class="spacer" />
             <span class="tiny muted chat-limit">{{ $t('ostatnie 50 wiadomości') }}</span>
             <span class="badge" :class="{ green: chat.length }">{{ chat.length }}</span>
@@ -154,7 +165,9 @@
             <iframe :src="data.map.url" :title="$t('Mapa {name}', { name: s.name })" loading="lazy" referrerpolicy="no-referrer" />
           </div>
           <div v-else class="card-body">
-            <div class="callout info small"><Info /><div>{{ $t('Mapa pojawi się po pierwszym uruchomieniu serwera z squaremap. Wygenerowanie kafelków może zająć chwilę.') }}</div></div>
+            <div class="callout info small"><Info /><div>{{ data.map.needs_running && !s.running
+              ? $t('Mapa ({m}) jest dostępna, gdy serwer działa.', { m: data.map.title })
+              : $t('Mapa pojawi się po uruchomieniu serwera. Pierwsze kafelki mogą potrzebować chwili.') }}</div></div>
           </div>
         </section>
 
@@ -170,7 +183,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { Copy, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, ServerOff, Settings2, Sun, Timer, Users } from 'lucide-vue-next'
+import { Copy, ExternalLink, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, Mountain, ServerOff, Settings2, Sun, Timer, Users } from 'lucide-vue-next'
 import BrandMark from '../components/BrandMark.vue'
 import LangSwitch from '../components/LangSwitch.vue'
 import Meter from '../components/Meter.vue'
@@ -209,6 +222,11 @@ const lastSeenText = computed(() => {
   const last = data.value?.offline[0]?.last_seen
   return last ? t('ostatnio ktoś grał {t}', { t: timeAgo(last) }) : t('nikt jeszcze nie grał')
 })
+const LOD_MODS = {
+  distant_horizons: { name: 'Distant Horizons', links: [{ name: 'Modrinth', url: 'https://modrinth.com/mod/distanthorizons' }] },
+  voxy: { name: 'Voxy', links: [{ name: 'Voxy', url: 'https://modrinth.com/mod/voxy' }, { name: 'LOD Server Support', url: 'https://modrinth.com/mod/lod-server-support' }] },
+}
+const lodMods = computed(() => (data.value?.lod?.mods || []).filter((id) => LOD_MODS[id]).map((id) => ({ id, ...LOD_MODS[id] })))
 const chat = computed(() => (data.value?.chat || []).slice(-50))
 const chatLast = computed(() => chat.value.length ? chat.value[chat.value.length - 1].seq : 0)
 
@@ -306,13 +324,11 @@ onUnmounted(() => {
 .pms.red { color: var(--danger); }
 .empty.small { padding: 36px 20px; font-size: 13px; }
 
-.chat-card .card-head h3 { display: flex; align-items: center; gap: 8px; }
-.chat-card .card-head h3 svg { width: 16px; height: 16px; color: var(--muted); }
 .chat-limit { white-space: nowrap; }
 .chat-list { max-height: 380px; overflow-y: auto; padding: 8px 10px 12px; overscroll-behavior: contain; }
 .chat-msg { display: flex; gap: 11px; padding: 7px 10px; border-radius: var(--radius-sm); animation: chat-in 0.22s ease-out; }
 .chat-msg:hover { background: var(--surface-2); }
-.chat-head { width: 34px; height: 34px; border-radius: 8px; flex: none; image-rendering: pixelated; background: var(--surface-2); }
+.chat-head { width: 32px; height: 32px; border-radius: 7px; flex: none; image-rendering: pixelated; background: var(--surface-2); }
 .chat-body { min-width: 0; flex: 1; }
 .chat-meta { display: flex; align-items: baseline; gap: 8px; }
 .chat-name { font-weight: 650; font-size: 13px; letter-spacing: -0.01em; }
@@ -329,6 +345,17 @@ onUnmounted(() => {
 .addr:hover { border-color: var(--border-strong); }
 .addr svg { width: 13px; height: 13px; color: var(--muted); }
 
+.lod { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.lod-head { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.lod-head svg { width: 15px; height: 15px; color: var(--muted); }
+.lod-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.lod-name { font-weight: 600; font-size: 13px; }
+.lod-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.lod-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; }
+.lod-link:hover { border-color: var(--border-strong); text-decoration: none; }
+.lod-link svg { width: 12px; height: 12px; color: var(--muted); }
 .search { width: 200px; height: 30px; font-size: 12.5px; }
 .recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; padding: 14px 20px; }
 .recent-item { display: flex; align-items: center; gap: 10px; padding: 6px 4px; min-width: 0; }

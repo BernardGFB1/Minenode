@@ -15,114 +15,170 @@
 
       <div class="divider" />
 
-      <div v-if="!v" class="row small muted"><Loader2 class="spin" style="width: 15px" /> {{ $t('Sprawdzanie squaremap…') }}</div>
+      <div v-if="!v" class="row small muted"><Loader2 class="spin" style="width: 15px" /> {{ $t('Sprawdzanie mapy…') }}</div>
       <template v-else>
         <div class="row" style="align-items: flex-start; gap: 12px">
           <MapIcon class="hi" style="margin-top: 2px" />
           <div class="grow col" style="gap: 2px">
             <div class="row" style="gap: 8px">
-              <b class="small">{{ $t('Mapa świata (squaremap)') }}</b>
+              <b class="small">{{ $t('Mapa świata na żywo') }}</b>
               <span v-if="v.enabled && v.map_available" class="badge green">{{ $t('na stronie') }}</span>
+              <span v-else-if="v.enabled && cur.proxy && !v.running" class="badge">{{ $t('gdy serwer działa') }}</span>
               <span v-else-if="v.enabled" class="badge amber">{{ $t('oczekuje na start') }}</span>
               <span v-else class="badge">{{ $t('opcjonalna') }}</span>
             </div>
-            <div class="tiny muted">{{ $t('Dodaje do strony interaktywną mapę na żywo. Panel sam instaluje i aktualizuje squaremap.') }}</div>
+            <div class="tiny muted">{{ $t('Dodaje do strony interaktywną mapę. Panel sam instaluje, aktualizuje i konfiguruje wybraną mapę.') }}</div>
           </div>
-          <Toggle :model-value="v.enabled" :disabled="busy || !v.supported || (!v.enabled && !v.available)" @update:model-value="toggle" />
+          <Toggle :model-value="v.enabled" :disabled="busy || !cur.supported || (!v.enabled && cur.available === false)" @update:model-value="(on) => save({ enabled: on })" />
         </div>
 
-        <div v-if="!v.supported" class="callout small">
-          <Info />
-          <div>{{ $t('Mapa wymaga silnika z pluginami lub modami (Paper, Purpur, Fabric, Quilt, Forge, NeoForge). Strona ze statystykami działa bez niej.') }}</div>
+        <div class="providers" role="radiogroup" :aria-label="$t('Rodzaj mapy')">
+          <button v-for="p in v.providers" :key="p.id" type="button" role="radio" class="prov" :aria-checked="p.id === v.provider"
+                  :class="{ on: p.id === v.provider, off: !p.supported }" :disabled="busy || !p.supported || renderRunning" :title="p.reason || ''"
+                  @click="pick(p)">
+            <span class="row" style="gap: 6px"><b>{{ p.title }}</b><span class="badge">{{ p.three_d ? '2D / 3D' : '2D' }}</span></span>
+            <span class="tiny muted">{{ p.supported ? $t(p.about) : $t(p.reason) }}</span>
+          </button>
         </div>
-        <div v-else-if="!v.available && !v.enabled" class="callout warn small">
-          <AlertTriangle /><div>{{ v.error || $t('Brak wersji squaremap dla tego silnika i wersji Minecrafta.') }}</div>
+
+        <div v-if="!cur.supported" class="callout small"><Info /><div>{{ $t(cur.reason) }}</div></div>
+        <div v-else-if="cur.available === false && !v.enabled" class="callout warn small">
+          <AlertTriangle /><div>{{ cur.error || $t('Brak wersji tej mapy dla tego silnika i wersji Minecrafta.') }}</div>
         </div>
+        <div v-else-if="cur.compat === 'warn'" class="callout warn small">
+          <AlertTriangle /><div>{{ $t('{m} nie ma wersji oznaczonej dla Minecrafta {v} – panel użyje najbliższej. Powinna działać, ale nie jest to potwierdzone.', { m: cur.title, v: v.mc_version }) }}</div>
+        </div>
+        <div v-if="v.provider === 'bluemap' && !v.enabled && cur.supported" class="callout info small"><Info /><div>{{ $t('BlueMap pobiera pliki klienta Minecrafta z serwerów Mojang, żeby narysować bloki. Włączając BlueMap, akceptujesz EULA Minecrafta (minecraft.net/eula).') }}</div></div>
+
+        <template v-if="cur.supported">
+          <Toggle :model-value="v.show_players" :disabled="busy" :label="$t('Pokazuj pozycje graczy')"
+                  :hint="$t('Gracze online są widoczni na mapie na żywo. Wyłącz, jeśli pozycje mają zostać tajemnicą.')" @update:model-value="(on) => save({ show_players: on })" />
+          <div v-if="cur.three_d" class="row wrap" style="gap: 10px">
+            <span class="small">{{ $t('Widok') }}</span>
+            <div class="seg">
+              <button type="button" :class="{ active: !v.render_3d }" :disabled="busy" @click="save({ render_3d: false })">{{ $t('Tylko 2D') }}</button>
+              <button type="button" :class="{ active: v.render_3d }" :disabled="busy" @click="save({ render_3d: true })">2D + 3D</button>
+            </div>
+            <span class="tiny muted">{{ $t(viewHint) }}</span>
+          </div>
+        </template>
 
         <template v-if="v.enabled">
-          <Toggle :model-value="v.idle_render" :disabled="busy" :label="$t('Renderuj mapę, gdy nikt nie gra')"
-                  :hint="renderHint" @update:model-value="setIdleRender" />
+          <div class="render">
+            <div class="grow col" style="gap: 2px">
+              <b class="small">{{ $t('Generowanie mapy') }}</b>
+              <span class="tiny muted">{{ renderText }}</span>
+            </div>
+            <button v-if="renderRunning" class="btn sm" :disabled="renderBusy" @click="render('cancel')"><Square /> {{ $t('Przerwij') }}</button>
+            <button v-else class="btn sm" :disabled="renderBusy || !v.online" :title="v.online ? '' : $t('Uruchom serwer, żeby wygenerować mapę')" @click="render('start')">
+              <Loader2 v-if="renderBusy" class="spin" /><Play v-else /> {{ $t('Wygeneruj mapę') }}</button>
+          </div>
 
           <dl class="info">
             <dt>{{ $t('Wersja') }}</dt>
             <dd>
-              <span class="mono">{{ v.version || '—' }}</span>
-              <span v-if="v.update_available" class="badge amber" style="margin-left: 8px">{{ $t('dostępna {v}', { v: v.latest_version }) }}</span>
+              <span class="mono">{{ cur.version || '—' }}</span>
+              <span v-if="cur.update_available" class="badge amber" style="margin-left: 8px">{{ $t('dostępna {v}', { v: cur.latest_version }) }}</span>
             </dd>
-            <dt>{{ $t('Konfiguracja') }}</dt>
-            <dd class="mono">{{ v.data_dir }}/config.yml</dd>
+            <dt>{{ $t('Pliki mapy') }}</dt>
+            <dd class="mono">{{ v.data_dir }}/</dd>
           </dl>
 
           <div class="row wrap" style="gap: 8px">
             <a v-if="v.map_available" :href="v.map_url" target="_blank" rel="noopener" class="btn sm"><MapIcon /> {{ $t('Otwórz samą mapę') }}</a>
-            <button v-if="v.update_available" class="btn sm" :disabled="busy" @click="toggle(true)">
+            <button v-if="cur.update_available" class="btn sm" :disabled="busy" @click="save({ update: true })">
               <Loader2 v-if="busy" class="spin" /><Download v-else /> {{ $t('Zaktualizuj teraz') }}
             </button>
           </div>
-
-          <div v-if="restart" class="callout warn small">
-            <RotateCcw />
-            <div class="grow">{{ $t('Zmiana zadziała po restarcie serwera.') }}</div>
-            <button class="btn sm" @click="doRestart">{{ $t('Restartuj teraz') }}</button>
-          </div>
-          <div v-else-if="!v.map_available" class="callout info small">
-            <Info /><div>{{ $t('Mapa pojawi się po pierwszym uruchomieniu serwera z squaremap. Wygenerowanie kafelków może zająć chwilę.') }}</div>
-          </div>
         </template>
-        <div v-else-if="v.installed" class="tiny muted">{{ $t('squaremap jest zainstalowany, ale wyłączony – strona pokazuje tylko statystyki.') }}</div>
+
+        <div v-if="restart" class="callout warn small">
+          <RotateCcw />
+          <div class="grow">{{ $t('Zmiana zadziała po restarcie serwera.') }}</div>
+          <button class="btn sm" @click="doRestart">{{ $t('Restartuj teraz') }}</button>
+        </div>
+        <div v-else-if="v.enabled && !v.map_available && !(cur.proxy && !v.running)" class="callout info small">
+          <Info /><div>{{ $t('Mapa pojawi się po uruchomieniu serwera z nową mapą. Pierwsze kafelki mogą potrzebować chwili.') }}</div>
+        </div>
       </template>
     </div>
   </section>
 </template>
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { AlertTriangle, BarChart3, Copy, Download, ExternalLink, Info, Loader2, Map as MapIcon, RotateCcw } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { AlertTriangle, BarChart3, Copy, Download, ExternalLink, Info, Loader2, Map as MapIcon, Play, RotateCcw, Square } from 'lucide-vue-next'
 import Toggle from './Toggle.vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import { toast, toastError } from '../store'
+import { confirmDialog, toast, toastError } from '../store'
 import { copyText } from '../utils'
 
 const props = defineProps({ serverId: String, subdomain: String })
 const v = ref(null)
 const busy = ref(false)
 const restart = ref(false)
+const renderBusy = ref(false)
+let timer = null
 
 const pageUrl = computed(() => v.value?.public_url || `/${props.subdomain}/stats`)
 const fullUrl = computed(() => `${window.location.origin}${pageUrl.value}`)
-const renderHint = computed(() => {
+const cur = computed(() => v.value?.current || {})
+const renderRunning = computed(() => !!v.value?.render?.running)
+const viewHint = computed(() => v.value?.provider === 'bluemap'
+  ? (v.value.render_3d ? 'Modele 3D bloków – najładniej, ale renderowanie trwa dłużej i zajmuje więcej miejsca.' : 'Tylko płaski widok z góry – szybkie renderowanie i mało miejsca na dysku.')
+  : (v.value?.render_3d ? 'Mapa płaska i izometryczna (ukośny widok terenu).' : 'Tylko płaska mapa – najmniej pracy dla serwera.'))
+const renderText = computed(() => {
   const r = v.value?.render
-  if (r?.rendering) return r.paused ? t('Render {w} jest wstrzymany, bo ktoś gra – wznowi się, gdy serwer opustoszeje.', { w: r.rendering })
-    : t('Teraz renderuje się {w}.', { w: r.rendering })
-  return t('Pełny render świata uruchamia się {m} min po wyjściu ostatniego gracza i wstrzymuje, gdy ktoś dołączy.', { m: Math.round((r?.delay || 120) / 60) })
+  if (r?.running) return t('Teraz renderuje się {w}. Kolejne światy: {n}.', { w: r.current || '…', n: r.queue.length })
+  if (v.value?.provider === 'bluemap') return t('BlueMap sam renderuje zmienione i nowe chunki. Przycisk renderuje wszystkie mapy od nowa – przydaje się po zmianie widoku.')
+  const done = r?.finished_at ? ' ' + t('Ostatnio: {d}.', { d: new Date(r.finished_at * 1000).toLocaleString() }) : ''
+  return t('Nowe i zmienione chunki pojawiają się na mapie same. Teren sprzed włączenia mapy dorysuje pełny render – uruchamiasz go tylko tym przyciskiem.') + done
 })
 
 async function load() {
-  try { v.value = await api.get(`/servers/${props.serverId}/squaremap`) } catch (e) { toastError(e) }
+  try { v.value = await api.get(`/servers/${props.serverId}/webmap`) } catch (e) { toastError(e) }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  timer = setInterval(() => { if (renderRunning.value) load() }, 5000)
+})
+onUnmounted(() => clearInterval(timer))
 
 async function copyLink() {
   if (await copyText(fullUrl.value)) toast(t('Skopiowano link'), 'success', 1800)
 }
 
-async function toggle(enabled) {
-  const wasInstalled = !!v.value?.installed
+async function save(patch) {
+  const was = v.value
   busy.value = true
   try {
-    const r = await api.post(`/servers/${props.serverId}/squaremap`, { enabled })
+    const r = await api.post(`/servers/${props.serverId}/webmap`, patch)
     v.value = r
-    restart.value = !!r.restart_required
-    if (enabled) toast(wasInstalled ? t('Zaktualizowano squaremap') : t('Zainstalowano squaremap'), 'success')
-    else toast(t('Wyłączono mapę – strona ze statystykami działa dalej'), 'success')
+    if (r.restart_required) restart.value = true
+    if (patch.enabled === true) toast(t('Mapa {m} gotowa', { m: r.current.title }), 'success')
+    else if (patch.enabled === false) toast(t('Wyłączono mapę – strona ze statystykami działa dalej'), 'success')
+    else if (patch.provider && was.enabled) toast(t('Wybrano mapę {m}', { m: r.current.title }), 'success')
+    else if (patch.update) toast(t('Zaktualizowano mapę'), 'success')
   } catch (e) { toastError(e) } finally { busy.value = false }
 }
 
-async function setIdleRender(on) {
-  busy.value = true
+async function pick(p) {
+  if (p.id === v.value.provider) return
+  if (v.value.enabled && !(await confirmDialog({
+    title: t('Zmienić mapę na {m}?', { m: p.title }),
+    message: t('Panel zainstaluje {m} i wyłączy obecną mapę (jej pliki zostaną na dysku). Nowa mapa zacznie się rysować od zera po restarcie serwera.', { m: p.title })
+      + (p.id === 'bluemap' ? ' ' + t('BlueMap pobiera pliki klienta Minecrafta z serwerów Mojang, żeby narysować bloki. Włączając BlueMap, akceptujesz EULA Minecrafta (minecraft.net/eula).') : ''),
+    confirmText: t('Zmień mapę'),
+  }))) return
+  save({ provider: p.id })
+}
+
+async function render(action) {
+  renderBusy.value = true
   try {
-    v.value = await api.post(`/servers/${props.serverId}/squaremap`, { enabled: v.value.enabled, idle_render: on })
-  } catch (e) { toastError(e) } finally { busy.value = false }
+    v.value = await api.post(`/servers/${props.serverId}/webmap/render`, { action })
+    if (action === 'start') toast(t('Renderowanie mapy rozpoczęte'), 'success')
+  } catch (e) { toastError(e) } finally { renderBusy.value = false }
 }
 
 async function doRestart() {
@@ -139,4 +195,17 @@ async function doRestart() {
 .info dt { color: var(--muted); }
 .info dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .callout:not(.warn):not(.info) { background: var(--surface-2); }
+.providers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.prov { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.prov:hover:not(:disabled) { border-color: var(--border-strong); }
+.prov.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.prov:disabled { cursor: not-allowed; }
+.prov.off { opacity: 0.6; }
+.prov b { font-size: 13px; }
+.render { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
+.seg button { height: 26px; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.seg button.active { background: var(--surface-3); color: var(--text); }
+@media (max-width: 700px) { .providers { grid-template-columns: 1fr; } }
 </style>

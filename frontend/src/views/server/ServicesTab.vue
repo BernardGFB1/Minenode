@@ -24,6 +24,8 @@
 
     <PublicPageCard :server-id="id" :subdomain="live.summary.subdomain" />
 
+    <LodCard :server-id="id" />
+
     <ChunkyCard :server-id="id" />
   </div>
 </template>
@@ -34,6 +36,7 @@ import Toggle from '../../components/Toggle.vue'
 import VoiceChatCard from '../../components/VoiceChatCard.vue'
 import BedrockCard from '../../components/BedrockCard.vue'
 import PublicPageCard from '../../components/PublicPageCard.vue'
+import LodCard from '../../components/LodCard.vue'
 import ChunkyCard from '../../components/ChunkyCard.vue'
 import { api } from '../../api'
 import { toast, toastError } from '../../store'

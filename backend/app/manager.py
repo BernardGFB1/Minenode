@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import logging
 import os
 import re
@@ -20,7 +21,7 @@ import psutil
 from . import java as javamod
 from . import players as playersmod
 from . import providers
-from .config import INTERNAL_PORT_START, INTERNAL_VOICE_PORT_START, PANEL_DIR, PROXY_PORT, SERVERS_DIR, VOICE_PORT
+from .config import INTERNAL_MAP_PORT_START, INTERNAL_PORT_START, INTERNAL_VOICE_PORT_START, PANEL_DIR, PROXY_PORT, SERVERS_DIR, VOICE_PORT
 from .models import PanelSettings, ServerConfig
 from .properties import read_properties, update_properties
 from .store import JsonStore
@@ -51,8 +52,12 @@ LEAVE_RE = re.compile(rf"\]: (?:System chat: )?{NAME} left the game")
 # Printed by the server itself whatever plugins do to the join/leave chat messages (EssentialsX etc.)
 LOGIN_RE = re.compile(rf"\]: {NAME}\[/[^\]]*\] logged in with entity id")
 # Player chat from the server log: "]: <Steve> message", optionally prefixed with "[Not Secure]".
-# Bedrock players seen through Geyser can have dots or spaces in their names.
-CHAT_RE = re.compile(r"\]: (?:\[Not Secure\] )?<([^<>]{1,40})>\s?(.*)$")
+# Bedrock players seen through Geyser can have dots or spaces in their names. Only the first "]: "
+# counts (the end of the log prefix), so text inside a message or a kick reason is never a new line.
+_FIRST = r"^(?:(?!\]: ).)*\]: "
+CHAT_RE = re.compile(_FIRST + r"(?:\[Not Secure\] )?<([^<>]{1,40})>\s?(.*)$")
+EMOTE_RE = re.compile(_FIRST + r"(?:\[Not Secure\] )?\* [^\s<>]{1,40} ")  # /me
+LOG_TIME_RE = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]")
 CHAT_BUFFER = 50
 MC_CODE_RE = re.compile(r"§[0-9A-FK-ORa-fk-or]")
 LOST_RE = re.compile(rf"\]: {NAME} lost connection:")
@@ -140,19 +145,36 @@ class ServerInstance:
                 with open(latest, "rb") as fh:
                     fh.seek(max(0, latest.stat().st_size - 64 * 1024))
                     lines = fh.read().decode("utf-8", "replace").splitlines()[-200:]
+                mtime = latest.stat().st_mtime
                 for line in lines:
                     self._append(line, "out")
+                    self._history_chat(ANSI_RE.sub("", line), mtime)
                 self._append("— powyżej: historia z logs/latest.log —", "panel")
         except OSError:
             pass
 
+    def _history_chat(self, plain: str, mtime: float) -> None:
+        """Chat from the log of the current session, so the public page keeps it across panel restarts.
+
+        Log lines carry only the time of day; the date comes from the log file (a time later than the
+        file's last write belongs to the day before)."""
+        m = CHAT_RE.search(plain)
+        t = LOG_TIME_RE.match(plain)
+        if not m or not t:
+            return
+        day = datetime.datetime.fromtimestamp(mtime)
+        at = day.replace(hour=int(t.group(1)), minute=int(t.group(2)), second=int(t.group(3)), microsecond=0).timestamp()
+        if at > mtime + 60:
+            at -= 86400
+        self._add_chat(m.group(1), m.group(2), at)
+
     # ------------------------------------------------------------ helpers
     @property
     def map_render(self):
-        """squaremap full renders scheduled for the times nobody plays (squaremap.IdleRender)."""
+        """Full web-map renders started from the panel (webmap.MapRender)."""
         if self._map_render is None:
-            from .squaremap import IdleRender
-            self._map_render = IdleRender(self)
+            from .webmap import MapRender
+            self._map_render = MapRender(self)
         return self._map_render
 
     @property
@@ -327,10 +349,14 @@ class ServerInstance:
             launch, loader = await providers.install(self.cfg.type, ctx)
             self.cfg.launch = launch
             self.cfg.loader_version = loader
-            from . import squaremap
-            if self.cfg.squaremap_enabled and not squaremap.engine_supported(self):
-                self.cfg.squaremap_enabled = False
-                log("squaremap wyłączony – nowy silnik nie obsługuje pluginów ani modów.")
+            from . import lod, webmap
+            if self.cfg.webmap.enabled and not webmap.engine_supported(self, self.cfg.webmap.provider):
+                self.cfg.webmap.enabled = False
+                log(f"Mapa {webmap.INFO[self.cfg.webmap.provider]['title']} wyłączona – nowy silnik jej nie obsługuje.")
+            for key in ("distant_horizons", "voxy"):
+                if getattr(self.cfg.lod, key) and not lod.supported(self, key):
+                    setattr(self.cfg.lod, key, False)
+                    log(f"{lod.jars(self)[key].title} wyłączony – nowy silnik go nie obsługuje.")
 
             if plan:
                 self.set_job("Instalacja modpacka", "Pobieranie modów", 0.6)
@@ -503,18 +529,22 @@ class ServerInstance:
                     if self.m.bedrock:
                         self.m.bedrock.request_apply()
                     self.panel_log(f"Bedrock wyłączony – nie udało się przygotować zgodności: {exc}")
-            from . import squaremap
-            if self.cfg.squaremap_enabled or squaremap.is_installed(self):
+            from . import lod, webmap
+            try:
+                if self.cfg.webmap.enabled and webmap.INFO[self.cfg.webmap.provider]["proxy"]:
+                    self.m.ensure_map_port(self)
+                result = await webmap.prepare(self)
+                if result and result.get("updated"):
+                    self.panel_log(f"{webmap.INFO[self.cfg.webmap.provider]['title']} zaktualizowany do {result.get('version')}.")
+            except Exception as exc:  # the map must never prevent the server from starting
+                self.panel_log(f"Mapa: nie udało się przygotować – {exc}")
+            if self.cfg.lod.distant_horizons or self.cfg.lod.voxy or lod.DH_MOD.jars(self) or lod.DH_PLUGIN.jars(self) or lod.VOXY.jars(self) or lod.LEGACY_VSS.jars(self):
                 try:
-                    if self.cfg.squaremap_enabled:
-                        result = await squaremap.ensure(self)
-                        if result and result.get("updated"):
-                            self.panel_log(f"squaremap zaktualizowany do {result.get('version')}.")
-                    else:
-                        # A manually installed squaremap must not bind the panel's port.
-                        await asyncio.to_thread(squaremap.write_config, self)
-                except Exception as exc:  # the map must never prevent the server from starting
-                    self.panel_log(f"squaremap: nie udało się przygotować mapy – {exc}")
+                    for key, r in (await lod.prepare(self)).items():
+                        if r.get("updated"):
+                            self.panel_log(f"{lod.jars(self)[key].title} zaktualizowany do {r.get('version')}.")
+                except Exception as exc:  # noqa: BLE001 – LODs must never prevent the server from starting
+                    self.panel_log(f"LOD: nie udało się przygotować – {exc}")
             from . import chunky
             if chunky.engine_supported(self) and chunky.installed_info(self):
                 try:
@@ -573,11 +603,17 @@ class ServerInstance:
             self._parse_line(ANSI_RE.sub("", line))
 
     def _parse_line(self, plain: str) -> None:
+        # Text a player typed must never be read as a server event: a chat line saying
+        # "There are 9 of a max of 20 players online: …" or "Saved the game" would otherwise
+        # change the player list, finish a backup's save wait or confuse map/Chunky progress.
+        if m := CHAT_RE.search(plain):
+            self._add_chat(m.group(1), m.group(2))
+            return
+        if EMOTE_RE.search(plain):
+            return
         for pattern, fut in list(self._waiters):
             if not fut.done() and pattern.search(plain):
                 fut.set_result(True)
-        if m := CHAT_RE.search(plain):
-            self._add_chat(m.group(1), m.group(2))
         if self.state == "starting" and DONE_RE.search(plain):
             self.set_state("online")
             self._autofix_count = 0
@@ -585,6 +621,9 @@ class ServerInstance:
             self.panel_log(f"Serwer działa – adres: {self.address()}")
             if self.cfg.idle_shutdown_minutes:
                 self.panel_log(f"Auto-wyłączanie: serwer zatrzyma się po {self.cfg.idle_shutdown_minutes} min bez graczy.")
+            if self.cfg.webmap.enabled and self.cfg.webmap.provider == "bluemap":
+                from . import webmap
+                self.spawn(webmap.on_online(self))
             return
         if m := UUID_RE.search(plain):
             self._remember(m.group(1), m.group(2))
@@ -608,18 +647,18 @@ class ServerInstance:
                 if m := r.search(plain):
                     self.record_attempt(m.group(1), None, "log")
                     break
-        elif "render" in plain and self.cfg.squaremap_enabled:
-            self.map_render.on_line(plain)
+        elif "render" in plain and self._map_render is not None:
+            self._map_render.on_line(plain)
         elif "Task " in plain or "No tasks" in plain:
             self.chunky_runner.on_line(plain)
 
-    def _add_chat(self, name: str, text: str) -> None:
+    def _add_chat(self, name: str, text: str, at: float | None = None) -> None:
         name = MC_CODE_RE.sub("", name).strip()
         text = MC_CODE_RE.sub("", text).strip()
         if not name or not text:
             return
         self._chat_seq += 1
-        self.chat.append({"seq": self._chat_seq, "t": time.time(), "name": name[:40], "text": text[:500]})
+        self.chat.append({"seq": self._chat_seq, "t": at or time.time(), "name": name[:40], "text": text[:500]})
 
     def _is_online(self, name: str) -> bool:
         key = name.lower()
@@ -665,8 +704,6 @@ class ServerInstance:
         elif self.empty_since is None:
             self.empty_since = time.time()
         self.broadcast({"type": "players", "players": sorted(self.online), "count": len(self.online)})
-        if self.cfg.squaremap_enabled and self.online:
-            self.map_render.on_players(len(self.online))
         if self.online and self._chunky is not None:
             self._chunky.on_players(len(self.online))
 
@@ -927,6 +964,20 @@ class Manager:
             port += 1
         return port
 
+    def ensure_map_port(self, inst: "ServerInstance") -> int:
+        """Loopback port for the web server of Dynmap/BlueMap (proxied by the panel under /map/<id>/).
+
+        A copied or imported server may carry another server's port, so a taken port is replaced."""
+        used = {i.cfg.webmap.port for i in self.instances.values() if i is not inst and i.cfg.webmap.port}
+        port = inst.cfg.webmap.port
+        if not port or port in used:
+            port = INTERNAL_MAP_PORT_START
+            while port in used:
+                port += 1
+            inst.cfg.webmap.port = port
+            self.save_server(inst.cfg)
+        return port
+
     def allocate_port(self) -> int:
         used = {i.cfg.internal_port for i in self.instances.values()}
         port = INTERNAL_PORT_START
@@ -1050,8 +1101,8 @@ class Manager:
                         inst.panel_log(f"Brak graczy od {idle} min – automatyczne wyłączanie serwera."
                                        + (" Uruchomi się sam, gdy ktoś spróbuje dołączyć." if inst.cfg.start_on_join else ""))
                         inst.spawn(inst.stop())
-                    if inst.cfg.squaremap_enabled:
-                        inst.map_render.tick(now)
+                    if inst._map_render is not None:
+                        inst._map_render.tick(now)
                     if inst.state == "online" and inst.chunky_runner.active:
                         inst.chunky_runner.tick(now)
                     if (inst.cfg.restart_daily_at == hhmm and inst.state == "online"

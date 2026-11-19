@@ -5,7 +5,7 @@ import re
 import time
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SERVER_TYPES = ("vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge", "custom")
 ServerType = Literal["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge", "custom"]
@@ -35,6 +35,26 @@ class ChunkySettings(BaseModel):
     radius: int = Field(default=2000, ge=16, le=1_000_000)  # blocks from the center
     only_when_empty: bool = True  # pause while players are online
     multicore: bool = False  # Paper: worker-threads = cores - 1; Fabric/Quilt: C2ME
+
+
+WebMapProvider = Literal["squaremap", "dynmap", "bluemap"]
+
+
+class WebMapSettings(BaseModel):
+    """The live web map on the public server page (Add-ons → Services)."""
+    enabled: bool = False
+    provider: WebMapProvider = "squaremap"
+    show_players: bool = True  # player positions on the map
+    render_3d: bool = False  # Dynmap/BlueMap: False renders only the light flat (2D) view
+    port: Optional[int] = None  # loopback web server of Dynmap/BlueMap, proxied by the panel
+
+
+class LodSettings(BaseModel):
+    """Server-side LOD (distant terrain) for Distant Horizons and Voxy clients."""
+    distant_horizons: bool = False
+    voxy: bool = False
+    distance: int = Field(default=128, ge=32, le=512)  # radius in chunks sent to players
+    generate: bool = False  # create missing chunks for LODs (costly) – otherwise existing terrain only
 
 
 class BackupSchedule(BaseModel):
@@ -96,8 +116,8 @@ class ServerConfig(BaseModel):
     voice_port: Optional[int] = None  # internal SVC port (allocated automatically)
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
     auth_enabled: bool = True  # routed through the hidden PicoLimbo lobby when offline-mode
-    squaremap_enabled: bool = False  # live web map served by the panel under /map/<id>/
-    squaremap_idle_render: bool = True  # full map renders while nobody is online
+    webmap: WebMapSettings = WebMapSettings()  # live web map served by the panel under /map/<id>/
+    lod: LodSettings = LodSettings()
     chunky: ChunkySettings = ChunkySettings()
     backup: BackupSchedule = BackupSchedule()
     modpack: Optional[ModpackInfo] = None
@@ -106,6 +126,18 @@ class ServerConfig(BaseModel):
     installed: bool = False
     created_at: float = Field(default_factory=time.time)
     last_backup_at: Optional[float] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_squaremap(cls, data):
+        # Before the map choice existed, the map was squaremap with its own switch.
+        if isinstance(data, dict) and "webmap" not in data and data.get("squaremap_enabled"):
+            data = {**data, "webmap": {"enabled": True, "provider": "squaremap"}}
+        return data
+
+    @property
+    def squaremap_enabled(self) -> bool:
+        return self.webmap.enabled and self.webmap.provider == "squaremap"
 
     @field_validator("subdomain")
     @classmethod
