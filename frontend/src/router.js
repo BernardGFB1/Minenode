@@ -18,6 +18,7 @@ const routes = [
       { path: '', name: 'server', component: () => import('./views/server/Overview.vue') },
       { path: 'console', name: 'server-console', component: () => import('./views/server/ConsoleTab.vue') },
       { path: 'players', name: 'server-players', component: () => import('./views/server/PlayersTab.vue') },
+      { path: 'public', name: 'server-public', component: () => import('./views/server/PublicPanelTab.vue') },
       { path: 'game', name: 'server-game', component: () => import('./views/server/PropertiesTab.vue') },
       {
         path: 'addons',

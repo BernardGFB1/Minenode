@@ -24,12 +24,12 @@ from starlette.websockets import WebSocketDisconnect
 from . import storage as storage_mod
 from . import bedrock_compat, datapacks as dpacks, packs, worldgen
 from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
-from . import chunky, lod, squaremap, webmap
+from . import chunky, lod, playerstats, squaremap, webmap
 from .models import ChunkySettings
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
 from .manager import Manager, ServerError, ServerInstance
-from .models import BackupSchedule, HOSTNAME_RE, JavaConfig, ModpackInfo, PanelSettings, ServerConfig, ServerType, SERVER_TYPES
+from .models import BackupSchedule, HOSTNAME_RE, JavaConfig, ModpackInfo, PanelSettings, PublicPageSettings, ServerConfig, ServerType, SERVER_TYPES
 from .properties import MANAGED_KEYS, read_properties, update_properties
 
 router = APIRouter(prefix="/api")
@@ -1910,22 +1910,32 @@ def _public_max_players(inst: ServerInstance) -> int:
 
 def _public_stats(inst: ServerInstance) -> dict:
     props = inst.props()
+    # The panel may have started before the server wrote its logs (or the log appeared later):
+    # read the last conversation lazily so the public page still shows chat while the server is off.
+    if not inst.running and not getattr(inst, "chat", None):
+        refresh = getattr(inst, "refresh_chat_history", None)
+        if refresh:
+            refresh()
     known = inst.players_store.data.get("known", {})
     online_names = sorted(inst.online, key=str.lower)
     online_keys = {name.lower() for name in online_names}
+    deaths = playerstats.death_counts(inst, known, online_names)
     online = []
     proxy = getattr(manager, "proxy", None)
     pings = proxy.player_pings(inst.cfg.id) if proxy else {}  # measured now; None for Bedrock/loopback
     for name in online_names:
         entry = known.get(name.lower(), {})
         online.append({"name": name, "uuid": entry.get("uuid"), "ping": pings.get(name.lower()),
-                       "joined_at": inst.online.get(name), "last_seen": entry.get("last_seen")})
+                       "joined_at": inst.online.get(name), "last_seen": entry.get("last_seen"),
+                       "deaths": deaths.get(name.lower(), 0)})
     offline = [
-        {"name": entry.get("name", key), "uuid": entry.get("uuid"), "last_seen": entry.get("last_seen") or 0}
+        {"name": entry.get("name", key), "uuid": entry.get("uuid"), "last_seen": entry.get("last_seen") or 0,
+         "deaths": deaths.get(key, 0)}
         for key, entry in known.items() if key not in online_keys
     ]
     offline.sort(key=lambda p: p["last_seen"], reverse=True)
     map_ready = webmap.map_available(inst)
+    page = getattr(inst.cfg, "public_page", None) or PublicPageSettings()
     return {
         "server": {
             "id": inst.cfg.id, "name": inst.cfg.name, "subdomain": inst.cfg.subdomain,
@@ -1939,11 +1949,13 @@ def _public_stats(inst: ServerInstance) -> dict:
                      if (inst.dir / "server-icon.png").is_file() else None),
             "whitelist": props.get("white-list", "false") == "true",
         },
-        "online": online,
-        "offline": offline[:200],
-        "chat": list(getattr(inst, "chat", [])),
+        # Hidden lists are emptied here, not only in the browser: a disabled section must not leak data.
+        "online": online if page.online_players else [],
+        "offline": offline[:200] if page.recent_players else [],
+        "chat": list(getattr(inst, "chat", [])) if page.chat else [],
         "players": {"online": len(online), "offline": len(offline), "known": len(online) + len(offline),
                     "max": _public_max_players(inst)},
+        "public_page": page.model_dump(),
         "lod": _public_lod(inst),
         "map": {
             "enabled": inst.cfg.webmap.enabled,
@@ -1965,7 +1977,12 @@ def _public_lod(inst: ServerInstance) -> dict:
 
 @public_router.get("/api/public/servers/{key}/stats")
 async def public_server_stats(key: str):
-    return JSONResponse(_public_stats(_public_inst(key)), headers={"Cache-Control": "no-store"})
+    inst = _public_inst(key)
+    page = getattr(inst.cfg, "public_page", None) or PublicPageSettings()
+    if not page.enabled:
+        return JSONResponse({"detail": "Publiczna strona jest wyłączona."}, status_code=403,
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse(_public_stats(inst), headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/api/public/server-icon/{sid}")
@@ -2093,6 +2110,34 @@ async def voice_install(sid: str, _: str = Depends(auth.require_user)):
     from .config import VOICE_PORT
     voice.write_config(inst, VOICE_PORT)
     return {**_voice_state(inst), "installed_files": ins.installed, "restart_required": inst.running}
+
+
+# ====================================================================== public stats page
+
+@router.get("/servers/{sid}/public-page")
+async def public_page_get(sid: str, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    return {**inst.cfg.public_page.model_dump(), "public_url": squaremap.public_url(inst)}
+
+
+class PublicPageBody(BaseModel):
+    enabled: Optional[bool] = None
+    online_players: Optional[bool] = None
+    join_guide: Optional[bool] = None
+    chat: Optional[bool] = None
+    recent_players: Optional[bool] = None
+    online_count: Optional[bool] = None
+    history_players: Optional[bool] = None
+
+
+@router.post("/servers/{sid}/public-page")
+async def public_page_set(sid: str, body: PublicPageBody, _: str = Depends(auth.require_user)):
+    inst = inst_or_404(sid)
+    data = inst.cfg.public_page.model_dump()
+    data.update(body.model_dump(exclude_none=True))
+    inst.cfg.public_page = PublicPageSettings.model_validate(data)
+    manager.save_server(inst.cfg)
+    return {**inst.cfg.public_page.model_dump(), "public_url": squaremap.public_url(inst)}
 
 
 # ====================================================================== web map (squaremap / Dynmap / BlueMap)

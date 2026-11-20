@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
+import gzip
 import logging
 import os
 import re
@@ -59,6 +60,9 @@ CHAT_RE = re.compile(_FIRST + r"(?:\[Not Secure\] )?<([^<>]{1,40})>\s?(.*)$")
 EMOTE_RE = re.compile(_FIRST + r"(?:\[Not Secure\] )?\* [^\s<>]{1,40} ")  # /me
 LOG_TIME_RE = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]")
 CHAT_BUFFER = 50
+# How many rotated logs are searched when latest.log does not have enough chat.
+CHAT_LOG_FILES = 5
+ROTATED_LOG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+\.log(?:\.gz)?$", re.I)
 MC_CODE_RE = re.compile(r"§[0-9A-FK-ORa-fk-or]")
 LOST_RE = re.compile(rf"\]: {NAME} lost connection:")
 UUID_RE = re.compile(rf"UUID of player {NAME} is ([0-9a-fA-F-]{{32,36}})")
@@ -136,6 +140,7 @@ class ServerInstance:
         self._map_render = None
         self._chunky = None
         self._proxy_players: dict[str, list] = {}  # lowercase name -> [name, open connections, since]
+        self._chat_log_sig: tuple | None = None
         self._load_log_history()
 
     def _load_log_history(self) -> None:
@@ -145,28 +150,90 @@ class ServerInstance:
                 with open(latest, "rb") as fh:
                     fh.seek(max(0, latest.stat().st_size - 64 * 1024))
                     lines = fh.read().decode("utf-8", "replace").splitlines()[-200:]
-                mtime = latest.stat().st_mtime
                 for line in lines:
                     self._append(line, "out")
-                    self._history_chat(ANSI_RE.sub("", line), mtime)
                 self._append("— powyżej: historia z logs/latest.log —", "panel")
         except OSError:
             pass
+        self.refresh_chat_history(force=True)
 
-    def _history_chat(self, plain: str, mtime: float) -> None:
-        """Chat from the log of the current session, so the public page keeps it across panel restarts.
+    @staticmethod
+    def _chat_entry(plain: str, mtime: float) -> tuple[float, str, str] | None:
+        """One chat message from a log line, or None for anything else.
 
         Log lines carry only the time of day; the date comes from the log file (a time later than the
         file's last write belongs to the day before)."""
         m = CHAT_RE.search(plain)
         t = LOG_TIME_RE.match(plain)
         if not m or not t:
-            return
+            return None
         day = datetime.datetime.fromtimestamp(mtime)
         at = day.replace(hour=int(t.group(1)), minute=int(t.group(2)), second=int(t.group(3)), microsecond=0).timestamp()
         if at > mtime + 60:
             at -= 86400
-        self._add_chat(m.group(1), m.group(2), at)
+        return at, m.group(1), m.group(2)
+
+    def _chat_log_files(self) -> list[tuple[Path, float, int]]:
+        """Logs that may contain player chat, newest first; latest.log always comes first."""
+        try:
+            files = []
+            for path in (self.dir / "logs").iterdir():
+                if path.name != "latest.log" and not ROTATED_LOG_RE.match(path.name):
+                    continue
+                try:
+                    st = path.stat()
+                except OSError:
+                    continue
+                files.append((path, st.st_mtime, st.st_size))
+        except OSError:
+            return []
+        files.sort(key=lambda item: item[1], reverse=True)
+        latest = next((item for item in files if item[0].name == "latest.log"), None)
+        if latest:
+            files.remove(latest)
+            files.insert(0, latest)
+        return files[: CHAT_LOG_FILES + 1]
+
+    @classmethod
+    def _chat_log_entries(cls, path: Path, mtime: float) -> list[tuple[float, str, str]]:
+        """The last chat messages in one log file."""
+        entries: deque[tuple[float, str, str]] = deque(maxlen=CHAT_BUFFER)
+        opener = gzip.open if path.name.lower().endswith(".gz") else open
+        try:
+            with opener(path, "rb") as fh:
+                for raw in fh:
+                    entry = cls._chat_entry(ANSI_RE.sub("", raw.decode("utf-8", "replace")), mtime)
+                    if entry:
+                        entries.append(entry)
+        except (OSError, EOFError):
+            return []
+        return list(entries)
+
+    def refresh_chat_history(self, force: bool = False) -> None:
+        """Load the last chat messages from the logs, so the public page shows them while offline.
+
+        The current log is read in full instead of only the console tail: on a busy server the latest
+        conversation can be thousands of lines above the end. Rotated logs are only a fallback when
+        latest.log has no (or too little) chat."""
+        files = self._chat_log_files()
+        signature = tuple((str(path), mtime, size) for path, mtime, size in files)
+        if not force and signature == getattr(self, "_chat_log_sig", None):
+            return
+        self._chat_log_sig = signature
+        entries: list[tuple[float, str, str]] = []
+        for path, mtime, _size in files:
+            file_entries = self._chat_log_entries(path, mtime)
+            if not file_entries:
+                continue
+            entries = file_entries + entries
+            if len(entries) >= CHAT_BUFFER:
+                entries = entries[-CHAT_BUFFER:]
+                break
+        if not entries:
+            return
+        self.chat.clear()
+        for at, name, text in entries[-CHAT_BUFFER:]:
+            self._add_chat(name, text, at)
 
     # ------------------------------------------------------------ helpers
     @property

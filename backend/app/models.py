@@ -49,6 +49,17 @@ class WebMapSettings(BaseModel):
     port: Optional[int] = None  # loopback web server of Dynmap/BlueMap, proxied by the panel
 
 
+class PublicPageSettings(BaseModel):
+    """What the public /<subdomain>/stats page shows (the server's "Panel publiczny" tab)."""
+    enabled: bool = True  # the whole page; turning it off makes the stats API refuse to answer
+    online_players: bool = True  # the list of players who are online right now
+    join_guide: bool = True  # the "how to join" card
+    chat: bool = True  # the last player chat messages
+    recent_players: bool = True  # players who were on the server recently
+    online_count: bool = True  # the "players online" tile
+    history_players: bool = True  # the "players in history" tile
+
+
 class LodSettings(BaseModel):
     """Server-side LOD (distant terrain) for Distant Horizons and Voxy clients."""
     distant_horizons: bool = False
@@ -118,6 +129,7 @@ class ServerConfig(BaseModel):
     bedrock_enabled: bool = False  # routed through the shared Geyser Bedrock gateway
     auth_enabled: bool = True  # routed through the hidden PicoLimbo lobby when offline-mode
     webmap: WebMapSettings = WebMapSettings()  # live web map served by the panel under /map/<id>/
+    public_page: PublicPageSettings = PublicPageSettings()  # visibility of the public stats page
     lod: LodSettings = LodSettings()
     chunky: ChunkySettings = ChunkySettings()
     backup: BackupSchedule = BackupSchedule()

@@ -22,7 +22,7 @@
 
     <BedrockCard :server-id="id" />
 
-    <PublicPageCard :server-id="id" :subdomain="live.summary.subdomain" />
+    <WebMapCard :server-id="id" />
 
     <LodCard :server-id="id" />
 
@@ -35,7 +35,7 @@ import { Info, LockKeyhole } from 'lucide-vue-next'
 import Toggle from '../../components/Toggle.vue'
 import VoiceChatCard from '../../components/VoiceChatCard.vue'
 import BedrockCard from '../../components/BedrockCard.vue'
-import PublicPageCard from '../../components/PublicPageCard.vue'
+import WebMapCard from '../../components/WebMapCard.vue'
 import LodCard from '../../components/LodCard.vue'
 import ChunkyCard from '../../components/ChunkyCard.vue'
 import { api } from '../../api'

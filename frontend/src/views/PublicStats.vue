@@ -14,7 +14,13 @@
     </header>
 
     <main class="page">
-      <div v-if="loading && !data" class="card empty"><Loader2 class="spin" /><div>{{ $t('Ładowanie serwera…') }}</div></div>
+      <div v-if="disabled" class="card empty">
+        <EyeOff />
+        <h2 class="missing-title">{{ $t('Publiczna strona jest wyłączona') }}</h2>
+        <p>{{ $t('Administrator tego serwera wyłączył publiczną stronę statystyk.') }}</p>
+      </div>
+
+      <div v-else-if="loading && !data" class="card empty"><Loader2 class="spin" /><div>{{ $t('Ładowanie serwera…') }}</div></div>
 
       <div v-else-if="!data" class="card empty">
         <ServerOff />
@@ -39,8 +45,8 @@
           <button class="btn primary" @click="copyAddress"><Copy /> {{ $addr(s.address) }}</button>
         </header>
 
-        <div class="grid grid-4">
-          <div class="card tile">
+        <div class="grid" :class="`grid-${tiles}`">
+          <div v-if="pub.online_count" class="card tile">
             <div class="tl"><Users /> {{ $t('Gracze online') }}</div>
             <div class="tv num">{{ data.players.online }}<small> / {{ data.players.max }}</small></div>
             <Meter :value="data.players.online / (data.players.max || 1)" />
@@ -55,15 +61,15 @@
             <div class="tv num">{{ s.mc_version }}</div>
             <div class="tiny muted ellipsis">{{ engineName }}<template v-if="s.loader_version"> · <span class="mono">{{ s.loader_version }}</span></template></div>
           </div>
-          <div class="card tile">
+          <div v-if="pub.history_players" class="card tile">
             <div class="tl"><History /> {{ $t('Gracze w historii') }}</div>
             <div class="tv num">{{ data.players.known }}</div>
             <div class="tiny muted">{{ lastSeenText }}</div>
           </div>
         </div>
 
-        <div class="grid grid-2">
-          <section class="card">
+        <div v-if="pub.online_players || pub.join_guide" class="grid" :class="{ 'grid-2': pub.online_players && pub.join_guide }">
+          <section v-if="pub.online_players" class="card">
             <div class="card-head"><h3>{{ $t('Online teraz') }}</h3><span class="badge" :class="{ green: data.online.length }">{{ data.online.length }}</span></div>
             <div v-if="!data.online.length" class="empty small"><Moon /><div>{{ isUp ? $t('Nikt teraz nie gra – wskocz pierwszy!') : $t('Serwer jest wyłączony.') }}</div></div>
             <ul v-else class="plist">
@@ -73,16 +79,17 @@
                   <div class="pname ellipsis">{{ p.name }}</div>
                   <div class="tiny muted">{{ $t('Na serwerze od {t}', { t: formatDuration(Math.max(0, now - (p.joined_at || now))) }) }}</div>
                 </div>
+                <span class="pms deaths num" :title="$t('Liczba śmierci z logów serwera')"><Skull />{{ p.deaths }}</span>
                 <span v-if="p.ping != null" class="pms num" :class="pingClass(p.ping)" :title="$t('Opóźnienie połączenia')">{{ p.ping }} ms</span>
                 <span v-else class="dot green" />
               </li>
             </ul>
           </section>
 
-          <section class="card">
+          <section v-if="pub.join_guide" class="card">
             <div class="card-head"><h3>{{ $t('Jak dołączyć') }}</h3></div>
             <div class="card-body col" style="gap: 14px">
-              <ServerListEntry :name="s.name" :motd="s.motd" :icon="s.icon" :players="`${data.players.online}/${data.players.max}`"
+              <ServerListEntry :name="s.name" :motd="s.motd" :icon="s.icon" :players="pub.online_count ? `${data.players.online}/${data.players.max}` : ''"
                                :version-label="isUp ? '' : '§cOffline'" />
               <ol class="steps small">
                 <li>{{ $t('Otwórz Minecraft: Java Edition w wersji {v}.', { v: s.mc_version }) }}</li>
@@ -107,7 +114,7 @@
           </section>
         </div>
 
-        <section class="card chat-card">
+        <section v-if="pub.chat" class="card chat-card">
           <div class="card-head">
             <h3>{{ $t('Czat graczy') }}</h3>
             <span class="spacer" />
@@ -117,8 +124,8 @@
           <div v-if="!chat.length" class="chat-empty">
             <MessageSquare />
             <div>
-              <div class="chat-empty-title">{{ isUp ? $t('Cisza na czacie') : $t('Serwer jest wyłączony.') }}</div>
-              <div class="tiny muted">{{ isUp ? $t('Wiadomości graczy pojawią się tutaj.') : $t('Czat pojawi się, gdy serwer zacznie działać.') }}</div>
+              <div class="chat-empty-title">{{ isUp ? $t('Cisza na czacie') : $t('Brak ostatnich wiadomości') }}</div>
+              <div class="tiny muted">{{ isUp ? $t('Wiadomości graczy pojawią się tutaj.') : $t('W logach serwera nie znaleziono wiadomości graczy.') }}</div>
             </div>
           </div>
           <div v-else ref="chatEl" class="chat-list" @scroll="onChatScroll">
@@ -135,7 +142,7 @@
           </div>
         </section>
 
-        <section v-if="data.offline.length" class="card">
+        <section v-if="pub.recent_players && data.offline.length" class="card">
           <div class="card-head">
             <h3>{{ $t('Ostatnio na serwerze') }}</h3>
             <input v-if="data.offline.length > 12" v-model="query" class="input search" :placeholder="$t('Szukaj gracza…')" />
@@ -147,6 +154,7 @@
                 <div class="pname ellipsis">{{ p.name }}</div>
                 <div class="tiny muted" :title="formatDate(p.last_seen)">{{ timeAgo(p.last_seen) }}</div>
               </div>
+              <span class="pms deaths num" :title="$t('Liczba śmierci z logów serwera')"><Skull />{{ p.deaths }}</span>
             </div>
             <div v-if="!recentShown.length" class="tiny muted" style="padding: 4px 2px">{{ $t('Brak graczy pasujących do wyszukiwania.') }}</div>
           </div>
@@ -183,7 +191,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { Copy, ExternalLink, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, Mountain, ServerOff, Settings2, Sun, Timer, Users } from 'lucide-vue-next'
+import { Copy, ExternalLink, EyeOff, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, Mountain, ServerOff, Settings2, Skull, Sun, Timer, Users } from 'lucide-vue-next'
 import BrandMark from '../components/BrandMark.vue'
 import LangSwitch from '../components/LangSwitch.vue'
 import Meter from '../components/Meter.vue'
@@ -202,6 +210,7 @@ const route = useRoute()
 const data = ref(null)
 const error = ref('')
 const loading = ref(true)
+const disabled = ref(false)
 const now = ref(Date.now() / 1000)
 const query = ref('')
 const limit = ref(24)
@@ -212,13 +221,19 @@ const key = computed(() => String(route.params.key || ''))
 const s = computed(() => data.value?.server)
 const engineName = computed(() => ENGINE_META[s.value?.type]?.name || s.value?.type || '')
 const isUp = computed(() => ['online', 'starting', 'stopping'].includes(s.value?.state))
+const pub = computed(() => data.value?.public_page || {
+  enabled: true, online_players: true, join_guide: true, chat: true,
+  recent_players: true, online_count: true, history_players: true,
+})
+const tiles = computed(() => 2 + Number(pub.value.online_count) + Number(pub.value.history_players))
 const recentFiltered = computed(() => {
   const q = query.value.trim().toLowerCase()
   return (data.value?.offline || []).filter((p) => !q || p.name.toLowerCase().includes(q))
 })
 const recentShown = computed(() => recentFiltered.value.slice(0, limit.value))
 const lastSeenText = computed(() => {
-  if (data.value?.online.length) return t('ktoś gra właśnie teraz')
+  if (data.value?.players.online) return t('ktoś gra właśnie teraz')
+  if (!pub.value.recent_players) return t('od początku istnienia serwera')
   const last = data.value?.offline[0]?.last_seen
   return last ? t('ostatnio ktoś grał {t}', { t: timeAgo(last) }) : t('nikt jeszcze nie grał')
 })
@@ -265,9 +280,16 @@ watch(chatLast, async (value, previous) => {
 async function load() {
   try {
     data.value = await api.get(`/public/servers/${encodeURIComponent(key.value)}/stats`)
+    disabled.value = false
     error.value = ''
   } catch (err) {
-    if (!data.value) error.value = err?.status === 404 ? t('Ten adres nie prowadzi do żadnego serwera.') : (err?.message || '')
+    if (err?.status === 403) {
+      data.value = null
+      disabled.value = true
+      error.value = ''
+    } else if (!data.value) {
+      error.value = err?.status === 404 ? t('Ten adres nie prowadzi do żadnego serwera.') : (err?.message || '')
+    }
   } finally {
     loading.value = false
   }
@@ -277,9 +299,15 @@ async function copyAddress() {
   if (await copyText(s.value?.address || '')) toast(t('Skopiowano adres'), 'success', 1800)
 }
 
-watch(key, () => { data.value = null; loading.value = true; query.value = ''; limit.value = 24; load() })
+watch(key, () => { data.value = null; disabled.value = false; loading.value = true; query.value = ''; limit.value = 24; load() })
 watchEffect(() => {
-  if (data.value) document.title = `${s.value.name} · ${data.value.players.online}/${data.value.players.max} ${t('online')}`
+  if (data.value && pub.value.online_count) {
+    document.title = `${s.value.name} · ${data.value.players.online}/${data.value.players.max} ${t('online')}`
+  } else if (data.value) {
+    document.title = `${s.value.name} · ${t('Publiczna strona ze statystykami serwera')}`
+  } else if (disabled.value) {
+    document.title = 'MineNode'
+  }
 })
 onMounted(() => {
   load()
@@ -318,7 +346,9 @@ onUnmounted(() => {
 .plist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .plist li:last-child { border-bottom: 0; }
 .dot.green { background: var(--accent); }
-.pms { font-size: 12px; color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; }
+.pms { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 2px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; }
+.pms svg { width: 12px; height: 12px; }
+.pms.deaths { color: var(--text-2); }
 .pms.green { color: var(--accent); }
 .pms.amber { color: var(--warn); }
 .pms.red { color: var(--danger); }

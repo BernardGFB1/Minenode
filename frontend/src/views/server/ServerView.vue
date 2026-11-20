@@ -76,6 +76,7 @@ const tabs = computed(() => [
   { to: '', label: 'Przegląd', icon: Gauge },
   { to: '/console', label: 'Konsola', icon: TerminalSquare },
   { to: '/players', label: 'Gracze', icon: Users, badge: live.pendingCount || null },
+  { to: '/public', label: 'Panel publiczny', icon: Globe },
   { to: '/game', label: 'Konfiguracja gry', icon: SlidersHorizontal },
   { to: '/addons', label: 'Dodatki', icon: Blocks },
   { to: '/files', label: 'Pliki', icon: FolderOpen },
