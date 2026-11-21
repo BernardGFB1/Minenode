@@ -29,7 +29,7 @@ def _inst(tmp_path, mc_version="1.21.4", known=None):
     )
 
 
-def _write_stats(root, world, *, play=144000, deaths=4, mined=1200, player_uuid=STEVE, new_layout=False):
+def _write_stats(root, world, *, play=144000, deaths=4, mined=1200, since_death=36000, player_uuid=STEVE, new_layout=False):
     folder = "players/stats" if new_layout else "stats"
     path = root / world / folder / f"{player_uuid}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,6 +38,7 @@ def _write_stats(root, world, *, play=144000, deaths=4, mined=1200, player_uuid=
         "stats": {
             "minecraft:custom": {
                 "minecraft:play_time": play,
+                "minecraft:time_since_death": since_death,
                 "minecraft:deaths": deaths,
                 "minecraft:mob_kills": 87,
                 "minecraft:player_kills": 2,
@@ -84,7 +85,7 @@ def test_player_stats_are_normalized_from_the_world_file(tmp_path):
     assert data["jumps"] == 1940
     assert data["distance_km"] == 9.72  # 972000 cm
     assert data["blocks_mined"] == 1214
-    assert data["items_crafted"] == 320
+    assert data["time_since_death_seconds"] == 1800  # 36000 ticks / 20 = 30 min
     assert data["top"]["mined"][0] == {"id": "minecraft:stone", "count": 1200}
     assert data["top"]["killed"][0]["id"] == "minecraft:zombie"
     assert data["last_seen"] == 1000

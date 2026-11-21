@@ -1222,7 +1222,7 @@ const strings = {
   'Zabójstwa graczy': 'Player kills',
   'Przebyty dystans': 'Distance traveled',
   'Wydobyte bloki': 'Blocks mined',
-  'Wytworzone przedmioty': 'Items crafted',
+  'Czas od śmierci': 'Time since death',
   'Skoki': 'Jumps',
   'Najczęściej wydobywane': 'Most mined',
   'Najczęściej wytwarzane': 'Most crafted',

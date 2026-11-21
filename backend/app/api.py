@@ -25,7 +25,7 @@ from starlette.websockets import WebSocketDisconnect
 from . import storage as storage_mod
 from . import bedrock_compat, datapacks as dpacks, packs, worldgen
 from . import auth, auth_sessions, content, files, java as javamod, modpacks, players as pl, providers, resourcepacks as rpacks, voice
-from . import chunky, lod, playerstats, squaremap, webmap
+from . import chunky, itemicons, lod, playerstats, squaremap, webmap
 from .models import ChunkySettings
 from .backups import safe_extract
 from .config import BEDROCK_PORT, DATA_DIR, PROXY_PORT, SECURE_COOKIES, TMP_DIR, VERSION, CURSEFORGE_API_KEY_ENV
@@ -2025,6 +2025,12 @@ async def public_player_stats(key: str, player_uuid: str):
     canonical = playerstats.norm_uuid(player_uuid)
     if not canonical:
         raise HTTPException(404, "Gracz nie istnieje")
+    # Build the icon index in the background so the first icon request does not pay for the
+    # client.jar download. The texture endpoint awaits the same lock if it is not ready yet.
+    async def _prefetch_icons():
+        with contextlib.suppress(Exception):
+            await itemicons.prepare(inst)
+    asyncio.create_task(_prefetch_icons())
     # World files are written on save; an online player would otherwise show data up to a few
     # minutes old. Throttled, because /save-all is not free and visitors may click around.
     if inst.running and inst.state == "online" and time.time() - getattr(inst, "_stats_save_at", 0) > 15:
@@ -2038,6 +2044,22 @@ async def public_player_stats(key: str, player_uuid: str):
                  canonical, getattr(inst.cfg, "id", "?"), playerstats.stats_dirs(inst), playerstats.level_name(inst))
         raise HTTPException(404, "Brak statystyk tego gracza")
     return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+
+@public_router.get("/api/public/servers/{key}/texture")
+async def public_item_texture(key: str, id: str):
+    """A block/item icon extracted from the server's client JAR, mods or resource pack."""
+    inst = _public_inst(key)
+    page = getattr(inst.cfg, "public_page", None) or PublicPageSettings()
+    if not page.enabled or not page.player_stats:
+        raise HTTPException(403, "Statystyki graczy są wyłączone.")
+    with contextlib.suppress(Exception):
+        await itemicons.prepare(inst)
+    # The first request for a block renders its model with PIL – keep that off the event loop.
+    path = await asyncio.to_thread(itemicons.icon_file, inst, id)
+    if not path:
+        raise HTTPException(404, "Brak tekstury tego przedmiotu")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @public_router.get("/api/public/server-icon/{sid}")

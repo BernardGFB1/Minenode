@@ -25,7 +25,10 @@
         <section v-for="c in lists" :key="c.key" class="listcard">
           <h4>{{ $t(c.label) }}</h4>
           <div v-for="item in c.items" :key="item.id" class="item">
-            <span class="ellipsis" :title="item.id">{{ itemLabel(item.id) }}</span>
+            <span class="iname">
+              <img v-if="!failedIcons.has(item.id)" :src="iconUrl(item.id)" @error="failIcon(item.id)" loading="lazy" alt="" />
+              <span class="ellipsis" :title="item.id">{{ itemLabel(item.id) }}</span>
+            </span>
             <span class="count num">{{ number(item.count) }}</span>
           </div>
         </section>
@@ -37,8 +40,8 @@
   </Modal>
 </template>
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { Footprints, Hammer, Info, Loader2, Pickaxe, Skull, Swords, Timer, TriangleAlert } from 'lucide-vue-next'
+import { computed, reactive, ref, watch } from 'vue'
+import { Footprints, Info, Loader2, Pickaxe, Skull, Swords, Timer, TriangleAlert } from 'lucide-vue-next'
 import Modal from './Modal.vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
@@ -55,10 +58,13 @@ defineEmits(['close'])
 const data = ref(null)
 const loading = ref(false)
 const error = ref('')
+const failedIcons = reactive(new Set())
 let request = 0
 
 const headUrl = computed(() => `https://mc-heads.net/avatar/${encodeURIComponent(data.value?.name || props.playerName)}/64`)
 const number = (value) => Number(value || 0).toLocaleString()
+const iconUrl = (id) => `/api/public/servers/${encodeURIComponent(props.serverKey)}/texture?id=${encodeURIComponent(id)}`
+const failIcon = (id) => failedIcons.add(id)
 const itemLabel = (id) => {
   if (!id) return ''
   const split = String(id).indexOf(':')
@@ -78,7 +84,7 @@ const metrics = computed(() => {
     { key: 'players', icon: Swords, label: 'Zabójstwa graczy', value: number(d.player_kills) },
     { key: 'distance', icon: Footprints, label: 'Przebyty dystans', value: `${number(d.distance_km)} km` },
     { key: 'mined', icon: Pickaxe, label: 'Wydobyte bloki', value: number(d.blocks_mined) },
-    { key: 'crafted', icon: Hammer, label: 'Wytworzone przedmioty', value: number(d.items_crafted) },
+    { key: 'death', icon: Timer, label: 'Czas od śmierci', value: formatDuration(d.time_since_death_seconds) },
     { key: 'jumps', icon: Footprints, label: 'Skoki', value: number(d.jumps) },
   ]
 })
@@ -93,6 +99,8 @@ const CATEGORIES = [
   ['picked_up', 'Podniesione przedmioty'],
   ['dropped', 'Upuszczone przedmioty'],
 ]
+// Every list can show an icon: blocks/items use their texture, mobs use their spawn egg
+// (the backend resolves both). Missing icons are hidden by the <img> error handler.
 const lists = computed(() => CATEGORIES
   .map(([key, label]) => ({ key, label, items: data.value?.top?.[key] || [] }))
   .filter((category) => category.items.length))
@@ -129,6 +137,8 @@ watch(() => [props.open, props.playerUuid, props.serverKey], load, { immediate: 
 .listcard h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 6px; }
 .item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .item:first-of-type { border-top: 0; }
+.iname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.iname img { width: 20px; height: 20px; flex: none; image-rendering: pixelated; background: var(--surface-2); border-radius: 3px; }
 .count { color: var(--text-2); flex: none; }
 @media (max-width: 720px) {
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

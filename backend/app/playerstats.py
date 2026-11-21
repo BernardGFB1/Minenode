@@ -366,6 +366,7 @@ def _normalize(stats: dict[str, dict[str, int]]) -> dict:
 
     mined = stats.get("minecraft:mined", {})
     crafted = stats.get("minecraft:crafted", {})
+    # time_since_death is a live counter in ticks that resets on every death (1 tick = 50 ms).
     return {
         "play_time_seconds": round(play_ticks / 20, 1),
         "play_time_hours": round(play_ticks / 72000, 2),
@@ -375,7 +376,7 @@ def _normalize(stats: dict[str, dict[str, int]]) -> dict:
         "jumps": value("minecraft:jump"),
         "distance_km": round(distance_cm / 100_000, 2),
         "blocks_mined": int(sum(mined.values())),
-        "items_crafted": int(sum(crafted.values())),
+        "time_since_death_seconds": round(value("minecraft:time_since_death") / 20, 1),
         "top": {
             "mined": _top(mined),
             "crafted": _top(crafted),
