@@ -177,7 +177,7 @@ def _read_json(path: Path, retries: int = 3, delay: float = 0.05) -> Any:
     for attempt in range(retries):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, PermissionError, OSError):
+        except (json.JSONDecodeError, PermissionError, OSError, UnicodeDecodeError):
             if attempt == retries - 1:
                 raise
             time.sleep(delay)
@@ -189,16 +189,37 @@ def level_name(inst: "ServerInstance") -> str:
 
 
 def stats_dirs(inst: "ServerInstance") -> list[Path]:
-    """The main world's stats folder plus other worlds (Multiverse and similar plugins)."""
+    """The main world's stats folder plus other worlds (Multiverse and similar plugins).
+
+    Since Minecraft 26.1 player files moved under ``<world>/players/`` (stats -> players/stats);
+    older versions keep them in ``<world>/stats``. The new layout wins when both exist so a
+    migrated world is not counted twice.
+    """
     root = Path(inst.dir)
-    primary = root / level_name(inst) / "stats"
+    primary = root / level_name(inst)
     result: list[Path] = []
-    if primary.is_dir():
-        result.append(primary)
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key not in seen:
+            seen.add(key)
+            result.append(path)
+
+    for candidate in (primary / "players" / "stats", primary / "stats"):
+        if candidate.is_dir():
+            add(candidate)
+            break
     try:
+        for path in root.glob("*/players/stats"):
+            if path.is_dir():
+                add(path)
         for path in root.glob("*/stats"):
-            if path.is_dir() and path != primary:
-                result.append(path)
+            if path.is_dir() and path.parent != primary:
+                add(path)
     except OSError:
         pass
     return result
@@ -234,7 +255,7 @@ def _list_names(path: Path) -> list[dict]:
     try:
         data = _read_json(path)
         return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError):
+    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError, UnicodeDecodeError):
         return []
 
 
@@ -289,7 +310,7 @@ def uuid_names(inst: "ServerInstance", wanted: set[str] | None = None) -> dict[s
         if isinstance(cache, dict):
             for uid, name in cache.items():
                 _add_names(names, uid, name)
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError):
+    except (FileNotFoundError, json.JSONDecodeError, PermissionError, OSError, UnicodeDecodeError):
         pass
 
     if wanted:
@@ -410,6 +431,8 @@ def sync_known(inst: "ServerInstance") -> None:
     changed = False
 
     # Merge entries that already refer to the same UUID (a premium player changed their nick).
+    # last_seen must never shrink: a naive dict.update would overwrite the newer value with the
+    # older one when the entry that survives the merge is not the one carrying the newest visit.
     by_uuid: dict[str, tuple[str, dict]] = {}
     for key, entry in list(known.items()):
         canonical = _norm_uuid(entry.get("uuid"))
@@ -417,13 +440,22 @@ def sync_known(inst: "ServerInstance") -> None:
             continue
         if canonical in by_uuid:
             other_key, other = by_uuid[canonical]
-            if entry.get("last_seen", 0) > other.get("last_seen", 0):
-                other.update({k: v for k, v in entry.items() if v not in (None, "")})
-                known.pop(key, None)
-            else:
-                other.update({k: v for k, v in entry.items() if v not in (None, "")})
+            merged = {k: v for k, v in other.items() if v not in (None, "")}
+            for k, v in entry.items():
+                if v in (None, ""):
+                    continue
+                if k == "last_seen":
+                    merged[k] = max(merged.get(k, 0), v)
+                elif not merged.get(k):
+                    merged[k] = v
+            if entry.get("last_seen", 0) >= other.get("last_seen", 0):
                 known.pop(other_key, None)
-                by_uuid[canonical] = (key, other)
+                known[key] = merged
+                by_uuid[canonical] = (key, merged)
+            else:
+                known.pop(key, None)
+                known[other_key] = merged
+                by_uuid[canonical] = (other_key, merged)
             changed = True
         else:
             by_uuid[canonical] = (key, entry)

@@ -239,6 +239,7 @@ const isUp = computed(() => ['online', 'starting', 'stopping'].includes(s.value?
 const pub = computed(() => data.value?.public_page || {
   enabled: true, online_players: true, join_guide: true, chat: true,
   recent_players: true, online_count: true, history_players: true, start_button: true,
+  player_stats: true,
 })
 const starting = ref(false)
 const canStart = computed(() => ['offline', 'crashed'].includes(s.value?.state))
@@ -335,7 +336,7 @@ async function startServer() {
 }
 
 function openStats(uuid, name) {
-  if (!pub.value.player_stats) return
+  if (!pub.value.player_stats || !uuid) return
   statsPlayer.value = { uuid, name }
   statsOpen.value = true
 }

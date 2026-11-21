@@ -62,7 +62,7 @@ EMOTE_RE = re.compile(_FIRST + r"(?:\[Not Secure\] )?\* [^\s<>]{1,40} ")  # /me
 LOG_TIME_RE = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]")
 CHAT_BUFFER = 50
 # How many rotated logs are searched when latest.log does not have enough chat.
-CHAT_LOG_FILES = 5
+CHAT_LOG_FILES = 12
 ROTATED_LOG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d+\.log(?:\.gz)?$", re.I)
 MC_CODE_RE = re.compile(r"§[0-9A-FK-ORa-fk-or]")
 LOST_RE = re.compile(rf"\]: {NAME} lost connection:")
@@ -161,18 +161,24 @@ class ServerInstance:
             playerstats.sync_known(self)
 
     @staticmethod
-    def _chat_entry(plain: str, mtime: float) -> tuple[float, str, str] | None:
+    def _chat_entry(path: Path, plain: str, mtime: float) -> tuple[float, str, str] | None:
         """One chat message from a log line, or None for anything else.
 
-        Log lines carry only the time of day; the date comes from the log file (a time later than the
-        file's last write belongs to the day before)."""
+        Log lines carry only the time of day, so the date has to come from the file. Rotated logs
+        have the date in their name (``2026-11-19-3.log``) – that is exact; for ``latest.log``
+        the file's last write time is the best available guess (a message later than the file's
+        mtime belongs to the previous day)."""
         m = CHAT_RE.search(plain)
         t = LOG_TIME_RE.match(plain)
         if not m or not t:
             return None
-        day = datetime.datetime.fromtimestamp(mtime)
+        named = re.match(r"^(\d{4})-(\d{2})-(\d{2})-", path.name)
+        if named:
+            day = datetime.datetime(int(named.group(1)), int(named.group(2)), int(named.group(3)))
+        else:
+            day = datetime.datetime.fromtimestamp(mtime)
         at = day.replace(hour=int(t.group(1)), minute=int(t.group(2)), second=int(t.group(3)), microsecond=0).timestamp()
-        if at > mtime + 60:
+        if not named and at > mtime + 60:
             at -= 86400
         return at, m.group(1), m.group(2)
 
@@ -205,7 +211,7 @@ class ServerInstance:
         try:
             with opener(path, "rb") as fh:
                 for raw in fh:
-                    entry = cls._chat_entry(ANSI_RE.sub("", raw.decode("utf-8", "replace")), mtime)
+                    entry = cls._chat_entry(path, ANSI_RE.sub("", raw.decode("utf-8", "replace")), mtime)
                     if entry:
                         entries.append(entry)
         except (OSError, EOFError):
@@ -220,7 +226,10 @@ class ServerInstance:
         latest.log has no (or too little) chat."""
         files = self._chat_log_files()
         signature = tuple((str(path), mtime, size) for path, mtime, size in files)
-        if not force and signature == getattr(self, "_chat_log_sig", None):
+        # Only trust the cache when it actually produced messages. An empty buffer with an
+        # unchanged signature must be retried: the log may have appeared/written after startup
+        # (or the first read happened before any player spoke).
+        if not force and signature == getattr(self, "_chat_log_sig", None) and self.chat:
             return
         self._chat_log_sig = signature
         entries: list[tuple[float, str, str]] = []

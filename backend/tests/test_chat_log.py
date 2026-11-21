@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import gzip
 import os
 import time
@@ -156,6 +157,30 @@ def test_chat_history_is_not_duplicated_when_nothing_changed(tmp_path, monkeypat
     assert [dict(m) for m in inst.chat] == first
 
 
+def test_empty_chat_cache_is_retried_when_messages_appear(tmp_path, monkeypatch):
+    """A first read before anyone spoke must not block later reads of the same log file."""
+    monkeypatch.setattr(mgr, "SERVERS_DIR", tmp_path)
+    inst, _ = _inst()
+    inst.cfg = SimpleNamespace(id="srv")
+    logs = tmp_path / "srv" / "logs"
+    logs.mkdir(parents=True)
+    latest = logs / "latest.log"
+    latest.write_text("[12:00:00] [Server thread/INFO]: Done (1.0s)!\n", encoding="utf-8")
+    inst.console = deque(maxlen=100)
+    inst._seq = 0
+    inst.broadcast = lambda msg: None
+
+    inst._load_log_history()
+    assert not inst.chat
+
+    # Same file signature, but now it contains chat (and mtime changed).
+    latest.write_text("[12:00:00] [Server thread/INFO]: <Steve> finally\n", encoding="utf-8")
+    t = time.time() + 1
+    os.utime(latest, (t, t))
+    inst.refresh_chat_history()
+    assert [(m["name"], m["text"]) for m in inst.chat] == [("Steve", "finally")]
+
+
 def test_public_page_lists_only_offered_lod_mods(tmp_path):
     from app.api import _public_lod
     from app.models import LodSettings
@@ -165,3 +190,12 @@ def test_public_page_lists_only_offered_lod_mods(tmp_path):
     assert _public_lod(inst) == {"mods": ["distant_horizons"]}
     inst.cfg.lod = LodSettings()
     assert _public_lod(inst) == {"mods": []}
+
+
+def test_rotated_log_messages_use_the_date_in_the_file_name(tmp_path):
+    path = tmp_path / "2026-11-18-3.log"
+    entry = ServerInstance._chat_entry(path, "[23:59:00] [Server thread/INFO]: <Alex> hi", time.time())
+    assert entry is not None
+    at, name, text = entry
+    assert datetime.datetime.fromtimestamp(at).date() == datetime.date(2026, 11, 18)
+    assert (name, text) == ("Alex", "hi")

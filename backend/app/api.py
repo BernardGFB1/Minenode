@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import platform
 import re
@@ -34,6 +35,7 @@ from .properties import MANAGED_KEYS, read_properties, update_properties
 
 router = APIRouter(prefix="/api")
 manager: Manager  # injected by main
+log = logging.getLogger("minenode")
 
 
 def M() -> Manager:
@@ -1911,8 +1913,9 @@ def _public_max_players(inst: ServerInstance) -> int:
 def _public_stats(inst: ServerInstance) -> dict:
     props = inst.props()
     # The panel may have started before the server wrote its logs (or the log appeared later):
-    # read the last conversation lazily so the public page still shows chat while the server is off.
-    if not inst.running and not getattr(inst, "chat", None):
+    # read the last conversation lazily so the public page still shows chat even while the server
+    # is running (refresh_chat_history clears and rebuilds the buffer, so no message is duplicated).
+    if not getattr(inst, "chat", None):
         refresh = getattr(inst, "refresh_chat_history", None)
         if refresh:
             refresh()
@@ -2031,6 +2034,8 @@ async def public_player_stats(key: str, player_uuid: str):
             await asyncio.sleep(0.35)
     data = await asyncio.to_thread(playerstats.player_stats, inst, canonical)
     if not data:
+        log.info("Brak statystyk gracza %s na serwerze %s (skanowane katalogi: %s, level-name: %s)",
+                 canonical, getattr(inst.cfg, "id", "?"), playerstats.stats_dirs(inst), playerstats.level_name(inst))
         raise HTTPException(404, "Brak statystyk tego gracza")
     return JSONResponse(data, headers={"Cache-Control": "no-store"})
 

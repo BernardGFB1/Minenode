@@ -29,8 +29,9 @@ def _inst(tmp_path, mc_version="1.21.4", known=None):
     )
 
 
-def _write_stats(root, world, *, play=144000, deaths=4, mined=1200, player_uuid=STEVE):
-    path = root / world / "stats" / f"{player_uuid}.json"
+def _write_stats(root, world, *, play=144000, deaths=4, mined=1200, player_uuid=STEVE, new_layout=False):
+    folder = "players/stats" if new_layout else "stats"
+    path = root / world / folder / f"{player_uuid}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "DataVersion": 4189,
@@ -107,6 +108,29 @@ def test_player_stats_unknown_player_returns_none(tmp_path):
     assert playerstats.player_stats(inst, "not-a-uuid") is None
 
 
+def test_player_stats_are_read_from_the_26_1_players_folder(tmp_path):
+    """Since Minecraft 26.1 player files live under <world>/players/stats."""
+    inst = _inst(tmp_path, mc_version="26.1", known={"steve": {"name": "Steve", "uuid": STEVE}})
+    _write_stats(tmp_path, "world", new_layout=True)
+
+    data = playerstats.player_stats(inst, STEVE)
+
+    assert data and data["name"] == "Steve"
+    assert data["play_time_hours"] == 2
+
+
+def test_migrated_world_is_not_counted_twice(tmp_path):
+    """A world migrated from the old layout must not sum the same stats twice."""
+    inst = _inst(tmp_path, mc_version="26.1", known={"steve": {"name": "Steve", "uuid": STEVE}})
+    _write_stats(tmp_path, "world", play=1000, mined=10, new_layout=True)
+    _write_stats(tmp_path, "world", play=999999, mined=999, new_layout=False)  # leftover
+
+    data = playerstats.player_stats(inst, STEVE)
+
+    assert data["play_time_seconds"] == 50  # only the players/stats file is used
+    assert data["blocks_mined"] == 24
+
+
 def test_sync_known_imports_players_from_stats_and_usercache(tmp_path):
     inst = _inst(tmp_path)
     stats = _write_stats(tmp_path, "world")
@@ -150,6 +174,22 @@ def test_sync_known_keeps_one_entry_per_uuid_after_a_nick_change(tmp_path):
 
     assert list(inst.players_store.data["known"]) == ["oldname"]
     assert inst.players_store.data["known"]["oldname"]["last_seen"] == 500
+
+
+def test_sync_known_never_shrinks_last_seen_when_merging(tmp_path):
+    uid = "7f2c0d9e-0000-0000-0000-000000000002"
+    inst = _inst(tmp_path, known={
+        "oldname": {"name": "OldName", "uuid": uid, "last_seen": 5000},
+        "newname": {"name": "NewName", "uuid": uid, "last_seen": 100},
+    })
+    _write_stats(tmp_path, "world", player_uuid=uid)
+
+    playerstats.sync_known(inst)
+
+    known = inst.players_store.data["known"]
+    assert len(known) == 1
+    entry = next(iter(known.values()))
+    assert entry["last_seen"] == 5000  # a dict.update would have overwritten it with 100
 
 
 def _api_instance(tmp_path, *, player_stats=True, mc_version="1.21.4"):
