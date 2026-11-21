@@ -1948,6 +1948,7 @@ def _public_stats(inst: ServerInstance) -> dict:
             "icon": (f"/api/public/server-icon/{inst.cfg.id}?v={inst.icon_version()}"
                      if (inst.dir / "server-icon.png").is_file() else None),
             "whitelist": props.get("white-list", "false") == "true",
+            "stats_supported": playerstats.supported(inst),
         },
         # Hidden lists are emptied here, not only in the browser: a disabled section must not leak data.
         "online": online if page.online_players else [],
@@ -1983,6 +1984,55 @@ async def public_server_stats(key: str):
         return JSONResponse({"detail": "Publiczna strona jest wyłączona."}, status_code=403,
                             headers={"Cache-Control": "no-store"})
     return JSONResponse(_public_stats(inst), headers={"Cache-Control": "no-store"})
+
+
+@public_router.post("/api/public/servers/{key}/start")
+async def public_server_start(key: str):
+    """Start a stopped server on behalf of a visitor – only if the owner allowed it.
+
+    There is no login here, so the button is gated by the same page switch plus its own flag.
+    Repeated clicks are harmless: a running (or already starting) server is left alone.
+    """
+    inst = _public_inst(key)
+    page = getattr(inst.cfg, "public_page", None) or PublicPageSettings()
+    if not page.enabled or not page.start_button:
+        return JSONResponse({"detail": "Uruchamianie serwera z tej strony jest wyłączone."}, status_code=403,
+                            headers={"Cache-Control": "no-store"})
+    if inst.running or inst.state in ("starting", "stopping", "installing"):
+        return JSONResponse({"ok": True, "state": inst.state, "started": False},
+                            headers={"Cache-Control": "no-store"})
+    try:
+        await inst.start()
+    except ServerError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"ok": True, "state": inst.state, "started": True}, headers={"Cache-Control": "no-store"})
+
+
+@public_router.get("/api/public/servers/{key}/players/{player_uuid}/stats")
+async def public_player_stats(key: str, player_uuid: str):
+    """World statistics of one player (1.13+), shown when a visitor clicks a name."""
+    inst = _public_inst(key)
+    page = getattr(inst.cfg, "public_page", None) or PublicPageSettings()
+    if not page.enabled or not page.player_stats:
+        return JSONResponse({"detail": "Statystyki graczy są wyłączone."}, status_code=403,
+                            headers={"Cache-Control": "no-store"})
+    if not playerstats.supported(inst):
+        return JSONResponse({"detail": "Statystyki są dostępne tylko dla Minecrafta 1.13 lub nowszego."},
+                            status_code=400, headers={"Cache-Control": "no-store"})
+    canonical = playerstats.norm_uuid(player_uuid)
+    if not canonical:
+        raise HTTPException(404, "Gracz nie istnieje")
+    # World files are written on save; an online player would otherwise show data up to a few
+    # minutes old. Throttled, because /save-all is not free and visitors may click around.
+    if inst.running and inst.state == "online" and time.time() - getattr(inst, "_stats_save_at", 0) > 15:
+        inst._stats_save_at = time.time()
+        with contextlib.suppress(Exception):
+            await inst.send_command("save-all", echo=False)
+            await asyncio.sleep(0.35)
+    data = await asyncio.to_thread(playerstats.player_stats, inst, canonical)
+    if not data:
+        raise HTTPException(404, "Brak statystyk tego gracza")
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
 
 @public_router.get("/api/public/server-icon/{sid}")
@@ -2128,6 +2178,8 @@ class PublicPageBody(BaseModel):
     recent_players: Optional[bool] = None
     online_count: Optional[bool] = None
     history_players: Optional[bool] = None
+    start_button: Optional[bool] = None
+    player_stats: Optional[bool] = None
 
 
 @router.post("/servers/{sid}/public-page")

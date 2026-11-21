@@ -45,6 +45,19 @@
           <button class="btn primary" @click="copyAddress"><Copy /> {{ $addr(s.address) }}</button>
         </header>
 
+        <div v-if="showStart" class="card start-card">
+          <div class="start-icon"><Loader2 v-if="starting" class="spin" /><Play v-else /></div>
+          <div class="grow" style="min-width: 0">
+            <b>{{ starting ? $t('Uruchamianie serwera…') : $t('Serwer jest wyłączony') }}</b>
+            <div class="tiny muted">{{ starting
+              ? $t('Pierwszy gracz będzie mógł dołączyć po chwili.')
+              : $t('Kliknij, aby go uruchomić. Pierwszy gracz będzie mógł dołączyć po chwili.') }}</div>
+          </div>
+          <button class="btn primary" :disabled="starting" @click="startServer">
+            <Loader2 v-if="starting" class="spin" /><Play v-else /> {{ starting ? $t('Uruchamianie…') : $t('Uruchom serwer') }}
+          </button>
+        </div>
+
         <div class="grid" :class="`grid-${tiles}`">
           <div v-if="pub.online_count" class="card tile">
             <div class="tl"><Users /> {{ $t('Gracze online') }}</div>
@@ -76,7 +89,7 @@
               <li v-for="p in data.online" :key="p.name">
                 <img class="head-img" :src="headUrl(p.name)" alt="" referrerpolicy="no-referrer" loading="lazy" />
                 <div class="grow">
-                  <div class="pname ellipsis">{{ p.name }}</div>
+                  <div class="pname ellipsis" @click="openStats(p.uuid || '', p.name)" :class="{ clickable: pub.player_stats }" :title="pub.player_stats ? $t('Kliknij, aby zobaczyć statystyki') : ''">{{ p.name }}</div>
                   <div class="tiny muted">{{ $t('Na serwerze od {t}', { t: formatDuration(Math.max(0, now - (p.joined_at || now))) }) }}</div>
                 </div>
                 <span class="pms deaths num" :title="$t('Liczba śmierci z logów serwera')"><Skull />{{ p.deaths }}</span>
@@ -151,7 +164,7 @@
             <div v-for="p in recentShown" :key="p.name" class="recent-item">
               <img class="head-img" :src="headUrl(p.name)" alt="" referrerpolicy="no-referrer" loading="lazy" />
               <div class="grow">
-                <div class="pname ellipsis">{{ p.name }}</div>
+                <div class="pname ellipsis" @click="openStats(p.uuid || '', p.name)" :class="{ clickable: pub.player_stats }" :title="pub.player_stats ? $t('Kliknij, aby zobaczyć statystyki') : ''">{{ p.name }}</div>
                 <div class="tiny muted" :title="formatDate(p.last_seen)">{{ timeAgo(p.last_seen) }}</div>
               </div>
               <span class="pms deaths num" :title="$t('Liczba śmierci z logów serwera')"><Skull />{{ p.deaths }}</span>
@@ -186,22 +199,24 @@
         </footer>
       </template>
     </main>
+    <PlayerStatsModal :open="statsOpen" :server-key="key" :player-uuid="statsPlayer.uuid" :player-name="statsPlayer.name" @close="closeStats" />
   </div>
 </template>
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { Copy, ExternalLink, EyeOff, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, Mountain, ServerOff, Settings2, Skull, Sun, Timer, Users } from 'lucide-vue-next'
+import { Copy, ExternalLink, EyeOff, Gamepad2, Globe, History, Info, Loader2, Maximize2, MessageSquare, Moon, Mountain, Play, ServerOff, Settings2, Skull, Sun, Timer, Users } from 'lucide-vue-next'
 import BrandMark from '../components/BrandMark.vue'
 import LangSwitch from '../components/LangSwitch.vue'
 import Meter from '../components/Meter.vue'
 import ServerAvatar from '../components/ServerAvatar.vue'
 import ServerListEntry from '../components/ServerListEntry.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import PlayerStatsModal from '../components/PlayerStatsModal.vue'
 import { api } from '../api'
 import { pingClass } from '../pings'
 import { t } from '../i18n'
-import { auth, toast, toggleTheme, ui } from '../store'
+import { auth, toast, toastError, toggleTheme, ui } from '../store'
 import { copyText, ENGINE_META, formatDate, formatDuration, STATE, timeAgo } from '../utils'
 
 const REFRESH_MS = 10_000
@@ -223,8 +238,11 @@ const engineName = computed(() => ENGINE_META[s.value?.type]?.name || s.value?.t
 const isUp = computed(() => ['online', 'starting', 'stopping'].includes(s.value?.state))
 const pub = computed(() => data.value?.public_page || {
   enabled: true, online_players: true, join_guide: true, chat: true,
-  recent_players: true, online_count: true, history_players: true,
+  recent_players: true, online_count: true, history_players: true, start_button: true,
 })
+const starting = ref(false)
+const canStart = computed(() => ['offline', 'crashed'].includes(s.value?.state))
+const showStart = computed(() => !!pub.value.start_button && (canStart.value || starting.value))
 const tiles = computed(() => 2 + Number(pub.value.online_count) + Number(pub.value.history_players))
 const recentFiltered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -247,6 +265,9 @@ const chatLast = computed(() => chat.value.length ? chat.value[chat.value.length
 
 const chatEl = ref(null)
 let chatStick = true
+
+const statsOpen = ref(false)
+const statsPlayer = ref({ uuid: '', name: '' })
 
 const headUrl = (name) => `https://mc-heads.net/avatar/${encodeURIComponent(name)}/40`
 const chatFullTime = (t) => new Date((t || 0) * 1000).toLocaleString()
@@ -299,6 +320,31 @@ async function copyAddress() {
   if (await copyText(s.value?.address || '')) toast(t('Skopiowano adres'), 'success', 1800)
 }
 
+async function startServer() {
+  if (starting.value) return
+  starting.value = true
+  try {
+    await api.post(`/public/servers/${encodeURIComponent(key.value)}/start`)
+    toast(t('Uruchamianie serwera…'), 'success', 2500)
+    await load()
+  } catch (err) {
+    toastError(err)
+  } finally {
+    starting.value = false
+  }
+}
+
+function openStats(uuid, name) {
+  if (!pub.value.player_stats) return
+  statsPlayer.value = { uuid, name }
+  statsOpen.value = true
+}
+
+function closeStats() {
+  statsOpen.value = false
+  statsPlayer.value = { uuid: '', name: '' }
+}
+
 watch(key, () => { data.value = null; disabled.value = false; loading.value = true; query.value = ''; limit.value = 24; load() })
 watchEffect(() => {
   if (data.value && pub.value.online_count) {
@@ -334,6 +380,12 @@ onUnmounted(() => {
 .meta { color: var(--muted); gap: 6px 14px; margin-top: 4px; }
 .missing-title { font-size: 17px; color: var(--text); margin: 4px 0 6px; }
 
+.start-card { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; }
+.start-card b { font-size: 14px; }
+.start-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 10px;
+  background: var(--surface-2); color: var(--accent); border: 1px solid var(--border); }
+.start-icon svg { width: 18px; height: 18px; }
+
 .tile { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .tl { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); font-weight: 550; }
 .tl svg { width: 15px; height: 15px; color: var(--muted); }
@@ -342,6 +394,7 @@ onUnmounted(() => {
 
 .head-img { width: 32px; height: 32px; border-radius: 7px; flex: none; image-rendering: pixelated; background: var(--surface-2); }
 .pname { font-weight: 550; font-size: 13.5px; }
+.pname.clickable { cursor: pointer; color: var(--accent); }
 .plist { list-style: none; margin: 0; padding: 6px 20px; }
 .plist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .plist li:last-child { border-bottom: 0; }
@@ -407,6 +460,7 @@ onUnmounted(() => {
   .topbar { padding: 0 16px; }
   .page { padding: 18px 16px 40px; }
   .head .btn.primary { width: 100%; justify-content: center; }
+  .start-card .btn { width: 100%; justify-content: center; }
   .search { width: 140px; }
   .chat-limit { display: none; }
   .foot { flex-direction: column; gap: 4px; }

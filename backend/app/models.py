@@ -58,6 +58,8 @@ class PublicPageSettings(BaseModel):
     recent_players: bool = True  # players who were on the server recently
     online_count: bool = True  # the "players online" tile
     history_players: bool = True  # the "players in history" tile
+    start_button: bool = True  # visitors may start the server from the public page
+    player_stats: bool = True  # clicking a player shows their world statistics (1.13+)
 
 
 class LodSettings(BaseModel):

@@ -30,6 +30,16 @@
           </div>
           <Toggle v-for="o in OPTIONS" :key="o.key" :model-value="v[o.key]" :disabled="busy"
                   :label="$t(o.label)" :hint="$t(o.hint)" @update:model-value="(on) => save({ [o.key]: on })" />
+
+          <div class="divider" />
+          <div class="col" style="gap: 2px">
+            <b class="small">{{ $t('Uruchamianie serwera') }}</b>
+            <span class="tiny muted">{{ $t('Gracze mogą sami włączyć serwer, gdy jest wyłączony.') }}</span>
+          </div>
+          <Toggle :model-value="v.start_button" :disabled="busy"
+                  :label="$t('Pozwól uruchomić serwer ze strony')"
+                  :hint="$t('Na publicznej stronie pojawi się przycisk „Uruchom serwer”, gdy serwer jest wyłączony.')"
+                  @update:model-value="(on) => save({ start_button: on })" />
         </template>
 
         <div v-else class="callout info small"><Info /><div>{{ $t('Publiczna strona jest wyłączona. Link powyżej nadal możesz skopiować – po włączeniu strony zacznie znów działać.') }}</div></div>
@@ -57,6 +67,7 @@ const OPTIONS = [
   { key: 'recent_players', label: 'Gracze ostatnio na serwerze', hint: 'Lista osób, które grały wcześniej, wraz z czasem ostatniej wizyty.' },
   { key: 'online_count', label: 'Aktualna liczba graczy online', hint: 'Kafelek z liczbą graczy online i limitem miejsc.' },
   { key: 'history_players', label: 'Gracze w historii', hint: 'Kafelek z łączną liczbą znanych graczy.' },
+  { key: 'player_stats', label: 'Statystyki graczy', hint: 'Kliknięcie gracza pokazuje jego statystyki z plików świata (Minecraft 1.13+).' },
 ]
 
 const pageUrl = computed(() => v.value?.public_url || '')

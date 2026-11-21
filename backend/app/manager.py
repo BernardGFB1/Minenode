@@ -21,6 +21,7 @@ import psutil
 
 from . import java as javamod
 from . import players as playersmod
+from . import playerstats
 from . import providers
 from .config import INTERNAL_MAP_PORT_START, INTERNAL_PORT_START, INTERNAL_VOICE_PORT_START, PANEL_DIR, PROXY_PORT, SERVERS_DIR, VOICE_PORT
 from .models import PanelSettings, ServerConfig
@@ -156,6 +157,8 @@ class ServerInstance:
         except OSError:
             pass
         self.refresh_chat_history(force=True)
+        with contextlib.suppress(Exception):  # startup must not fail on a half-written stats file
+            playerstats.sync_known(self)
 
     @staticmethod
     def _chat_entry(plain: str, mtime: float) -> tuple[float, str, str] | None:
@@ -807,6 +810,12 @@ class ServerInstance:
         entry["last_seen"] = time.time()
         if uid:
             entry["uuid"] = uid
+            canonical = playerstats.norm_uuid(uid)
+            if canonical:  # a premium player may have changed their nickname
+                for old_key, old in list(known.items()):
+                    if old_key != k and playerstats.norm_uuid(old.get("uuid")) == canonical:
+                        entry["last_seen"] = max(entry["last_seen"], old.get("last_seen", 0))
+                        known.pop(old_key, None)
         known[k] = entry
         self.players_store.save()
         self.bind_voice(name, entry.get("uuid"))
